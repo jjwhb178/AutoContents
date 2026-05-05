@@ -1,0 +1,249 @@
+"""
+Market Data Collector v2 — Phase 1
+수집 항목:
+  - VIX, US 10Y Yield, KOSPI, KOSDAQ, USD/KRW (yfinance)
+  - CNN Fear & Greed (primary) → alternative.me 백업 API
+  - 미국 주요 섹터 ETF 전일 수익률 (XLK, SOXX, XLF, XLV, XLE 등)
+  - 한국 시장 주도 섹터 추정 (Naver Finance 간이 파싱)
+"""
+import json
+import os
+import requests
+import yfinance as yf
+from datetime import datetime
+from bs4 import BeautifulSoup
+
+# ── 네이버 금융 주요 뉴스 수집 ────────────────────────────────────────────────
+def get_market_news():
+    """
+    네이버 금융의 주요 뉴스(시황) 헤드라인 및 이미지 URL 수집.
+    """
+    print("  Fetching market news headlines and images...")
+    news_items = []
+    try:
+        url = "https://finance.naver.com/news/mainnews.naver"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=10)
+        r.encoding = "euc-kr"
+        
+        soup = BeautifulSoup(r.text, "html.parser")
+        # 블록 단위로 파싱 (뉴스 1개당 보통 하나의 <ul>이나 <li> 구조이거나 dl > dt, dd)
+        # 네이버 금융 메인 뉴스는 <div class="mainNewsList"> 혹은 <dl class="newsList"> 사용
+        blocks = soup.select(".newsList")
+        if not blocks:
+            blocks = soup.select(".mainNewsList ul li")
+            
+        for dl in soup.select(".newsList"):
+            # 뉴스 항목 찾기
+            titles = dl.select("dd.articleSubject a")
+            images = dl.select("dt.thumb img")
+            
+            # 매칭 로직 (단순화: 뉴스 개수만큼)
+            for i, a_tag in enumerate(titles[:10]):
+                title = a_tag.get_text(strip=True)
+                img_url = None
+                if i < len(images):
+                    img_url = images[i].get("src")
+                    
+                news_items.append({
+                    "title": title,
+                    "img_url": img_url
+                })
+                
+    except Exception as e:
+        print(f"  [News] Failed to fetch headlines: {e}")
+        
+    # 기본 폴백: 만약 비어있다면 그냥 기존 방식 시도
+    if not news_items:
+        try:
+            soup = BeautifulSoup(r.text, "html.parser")
+            for s in soup.select("dd.articleSubject a")[:10]:
+                news_items.append({"title": s.get_text(strip=True), "img_url": None})
+        except:
+            pass
+            
+    return news_items
+
+
+# ── Fear & Greed: alternative.me (무료, 차단 없음) ────────────────────────
+def get_fear_greed():
+    try:
+        r = requests.get(
+            "https://api.alternative.me/fng/?limit=1",
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        d = r.json()["data"][0]
+        return int(d["value"]), d["value_classification"]
+    except Exception as e:
+        print(f"[Fear&Greed] Fallback failed: {e}")
+        return None, "Unknown"
+
+
+# ── 미국 섹터 ETF 수익률 ────────────────────────────────────────────────────
+US_SECTOR_ETFS = {
+    "반도체(SOXX)": "SOXX",
+    "빅테크(QQQ)":  "QQQ",
+    "금융(XLF)":    "XLF",
+    "에너지(XLE)":  "XLE",
+    "헬스케어(XLV)":"XLV",
+    "AI/IT(XLK)":  "XLK",
+}
+
+def get_us_sector_returns():
+    results = {}
+    for name, ticker in US_SECTOR_ETFS.items():
+        try:
+            hist = yf.Ticker(ticker).history(period="2d")
+            if len(hist) >= 2:
+                prev, curr = hist["Close"].iloc[-2], hist["Close"].iloc[-1]
+                results[name] = round((curr - prev) / prev * 100, 2)
+            else:
+                results[name] = None
+        except Exception:
+            results[name] = None
+    return results
+
+
+# ── 한국 주도 섹터 추정: yfinance 대형 ETF 활용 ─────────────────────────────
+KR_SECTOR_TICKERS = {
+    "반도체": "005930.KS",   # 삼성전자
+    "AI/소프트웨어": "035420.KS",  # NAVER
+    "2차전지": "373220.KS",  # LG에너지솔루션
+    "바이오": "207940.KS",   # 삼성바이오로직스
+    "로봇/자동화": "066570.KS",  # LG전자
+    "자동차": "005380.KS",   # 현대차
+    "방산": "047810.KS",     # 한국항공우주
+    "금융": "105560.KS",     # KB금융
+}
+
+def get_kr_sector_returns():
+    results = {}
+    for name, ticker in KR_SECTOR_TICKERS.items():
+        try:
+            hist = yf.Ticker(ticker).history(period="2d")
+            if len(hist) >= 2:
+                prev, curr = hist["Close"].iloc[-2], hist["Close"].iloc[-1]
+                results[name] = round((curr - prev) / prev * 100, 2)
+            else:
+                results[name] = None
+        except Exception:
+            results[name] = None
+    return results
+
+
+# ── Sector Pivot: 거래량 폭증 섹터 감지 ───────────────────────────────────────
+def detect_volume_surge(threshold: float = 1.5) -> list:
+    """
+    전일 대비 거래량이 threshold배 이상인 KR 섹터를 감지.
+    반환: [{"name": "로봇/자동화", "volume_ratio": 2.1}, ...] 내림차순
+    content_generator.detect_sector_pivot()의 입력 데이터.
+    """
+    surges = []
+    for name, ticker in KR_SECTOR_TICKERS.items():
+        try:
+            hist = yf.Ticker(ticker).history(period="3d")
+            if len(hist) >= 2:
+                prev_vol = hist["Volume"].iloc[-2]
+                curr_vol = hist["Volume"].iloc[-1]
+                if prev_vol and prev_vol > 0:
+                    ratio = round(curr_vol / prev_vol, 2)
+                    if ratio >= threshold:
+                        surges.append({"name": name, "volume_ratio": ratio})
+        except Exception:
+            pass
+    return sorted(surges, key=lambda x: x["volume_ratio"], reverse=True)
+
+
+def get_base_indicators():
+    tickers = {
+        "VIX":     "^VIX",
+        "TNX_10Y": "^TNX",
+        "USD_KRW": "KRW=X",
+        "KOSPI":   "^KS11",
+        "KOSDAQ":  "^KQ11",
+        "NASDAQ":  "^IXIC",
+        "SP500":   "^GSPC",
+    }
+    data = {}
+    for name, t in tickers.items():
+        try:
+            hist = yf.Ticker(t).history(period="2d")
+            if not hist.empty:
+                data[name]         = round(hist["Close"].iloc[-1], 2)
+                if len(hist) >= 2:
+                    prev = hist["Close"].iloc[-2]
+                    curr = hist["Close"].iloc[-1]
+                    data[f"{name}_chg"] = round((curr - prev) / prev * 100, 2)
+        except Exception as e:
+            print(f"[{name}] Error: {e}")
+    return data
+
+
+def main():
+    print("Phase 1: Collecting market data...")
+    data = get_base_indicators()
+    data["market_news"] = get_market_news()
+
+    fg_val, fg_label = get_fear_greed()
+    data["Fear_Greed"]        = fg_val
+    data["Fear_Greed_Rating"] = fg_label
+    print(f"  Fear & Greed: {fg_val} ({fg_label})")
+
+    print("  Fetching US sector ETF returns...")
+    data["us_sectors"] = get_us_sector_returns()
+
+    print("  Fetching KR sector proxy returns...")
+    data["kr_sectors"] = get_kr_sector_returns()
+
+    data["timestamp"] = datetime.now().isoformat()
+
+    # 주도 섹터 TOP3 (수익률 높은 순)
+    kr = {k: v for k, v in data["kr_sectors"].items() if v is not None}
+    sorted_kr = sorted(kr.items(), key=lambda x: x[1], reverse=True)
+    data["top_kr_sectors"]    = sorted_kr[:3]   # [(섹터명, 수익률), ...]
+    data["bottom_kr_sectors"] = sorted_kr[-2:]  # 하락 섹터
+
+    # ── Sector Pivot: 거래량 1.5배 폭증 섹터 감지 ──────────────────────────
+    print("  Detecting volume surge sectors (Sector Pivot)...")
+    surges = detect_volume_surge(threshold=1.5)
+    data["sector_volume_surge"] = surges
+    if surges:
+        print(f"  [PIVOT] 감지: {[s['name'] + ' x' + str(s['volume_ratio']) for s in surges]}")
+    else:
+        print("  [PIVOT] 해당 없음 (1.5배 폭증 섹터 없음)")
+
+    # ── NaN 정제: yfinance가 반환하는 NaN/numpy 값을 None으로 변환 ──────────
+    import math
+    def _sanitize(obj):
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [_sanitize(i) for i in obj]
+        elif isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+            return None
+        # numpy 타입을 Python 네이티브로 변환
+        try:
+            import numpy as np
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            elif isinstance(obj, (np.floating,)):
+                val = float(obj)
+                return None if math.isnan(val) else val
+        except ImportError:
+            pass
+        return obj
+
+    data = _sanitize(data)
+
+    os.makedirs("data", exist_ok=True)
+    with open("data/raw_market_data.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+    print(f"  Saved: data/raw_market_data.json")
+    print(f"  Top KR sectors: {data['top_kr_sectors']}")
+    print("Phase 1 complete.")
+
+
+if __name__ == "__main__":
+    main()

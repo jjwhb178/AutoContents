@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoneyDaddy AI Content Factory</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --accent-gold: #fbbf24;
+            --accent-blue: #3b82f6;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --term-bg: #020617;
+            --term-text: #34d399;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: radial-gradient(circle at top right, #1e1b4b, var(--bg-color));
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(to right, var(--accent-gold), #fcd34d);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1400px;
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 2rem;
+        }
+
+        .right-column {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .btn {
+            padding: 1rem 2rem;
+            font-size: 1.2rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .btn-run {
+            background: linear-gradient(45deg, var(--accent-gold), #d97706);
+            color: #000;
+            box-shadow: 0 0 15px rgba(251, 191, 36, 0.4);
+        }
+
+        .btn-run:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 25px rgba(251, 191, 36, 0.6);
+        }
+
+        .btn-run:active { transform: translateY(0); }
+
+        .btn-stop {
+            background: transparent;
+            border: 2px solid #ef4444;
+            color: #ef4444;
+        }
+
+        .btn-stop:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .status-box {
+            margin-top: 1rem;
+        }
+
+        .status-box h3 {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            color: var(--text-muted);
+        }
+
+        .phase-list {
+            list-style: none;
+        }
+
+        .phase-item {
+            padding: 0.8rem;
+            margin-bottom: 0.5rem;
+            background: rgba(0,0,0,0.2);
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            border-left: 4px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .phase-item.active {
+            border-left-color: var(--accent-gold);
+            background: rgba(251, 191, 36, 0.1);
+        }
+
+        .phase-item.done {
+            border-left-color: #10b981;
+        }
+
+        .terminal-container {
+            display: flex;
+            flex-direction: column;
+            height: 600px;
+        }
+
+        .terminal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .terminal-header h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .terminal-window {
+            flex-grow: 1;
+            background: var(--term-bg);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            color: var(--term-text);
+            overflow-y: auto;
+            border: 1px solid rgba(255,255,255,0.05);
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+        }
+
+        .log-line {
+            margin-bottom: 0.3rem;
+            line-height: 1.4;
+        }
+
+        .log-line.error { color: #ef4444; }
+        .log-line.warning { color: #f59e0b; }
+        .log-line.success { color: #10b981; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--term-bg); }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>MoneyDaddy AI Factory</h1>
+        <p>Ver 10.0 - Professional Narrative Synthesis Pipeline</p>
+    </div>
+
+    <div class="container">
+        <!-- Controls Panel -->
+        <div class="glass-panel controls">
+            <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+                <button id="btnDraft" class="btn btn-run" style="background: linear-gradient(45deg, #6366f1, #4f46e5); color: white;">📝 1단계: 초안 생성</button>
+                <button id="btnMedia" class="btn btn-run" style="background: linear-gradient(45deg, #8b5cf6, #7c3aed); color: white;">🎬 2단계: 미디어 제작</button>
+                <button id="btnPublish" class="btn btn-run" style="background: linear-gradient(45deg, #10b981, #059669); color: white;">🚀 3단계: 최종 포스팅</button>
+                <button id="btnRun" class="btn btn-run">🔥 전체 파이프라인 실행</button>
+                <button id="btnStop" class="btn btn-stop" style="display: none;">⏹ 작업 중지</button>
+                <button id="btnClear" class="btn" style="background: #334155; color: white;">🧹 로그 지우기</button>
+            </div>
+
+            <div class="status-box">
+                <h3>Pipeline Phases</h3>
+                <ul class="phase-list" id="phaseList">
+                    <li class="phase-item" data-phase="1">Phase 1: Market Data + News</li>
+                    <li class="phase-item" data-phase="2">Phase 2: Blog & Script Gen</li>
+                    <li class="phase-item" data-phase="3">Phase 3: PPT + Verification</li>
+                    <li class="phase-item" data-phase="4">Phase 4: TTS (Deep Bass)</li>
+                    <li class="phase-item" data-phase="5">Phase 5: A/B Thumbnails</li>
+                    <li class="phase-item" data-phase="6">Phase 6: Video Synthesis</li>
+                    <li class="phase-item" data-phase="7">Phase 7: Blog Publishing</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Terminal & Preview Panel -->
+        <div class="right-column">
+            <div class="glass-panel terminal-container">
+                <div class="terminal-header">
+                    <h2>Live Execution Logs</h2>
+                    <span id="connStatus" style="color: #ef4444; font-size: 0.9rem;">● Disconnected</span>
+                </div>
+                <div class="terminal-window" id="terminal">
+                    <div class="log-line" style="color: #64748b;">Initializing MoneyDaddy system...</div>
+                </div>
+            </div>
+
+            <div class="glass-panel preview-container" style="margin-top: 2rem; height: 400px; display: flex; flex-direction: column;">
+                <div class="terminal-header">
+                    <h2>Generated Draft Preview</h2>
+                    <button id="btnRefreshPreview" style="background: none; border: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; padding: 2px 8px; border-radius: 4px;">Refresh</button>
+                </div>
+                <div id="preview" style="flex-grow: 1; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 0.5rem; font-size: 0.9rem; white-space: pre-wrap; line-height: 1.6; color: #cbd5e1;">
+                    아직 생성된 원고가 없습니다.
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
