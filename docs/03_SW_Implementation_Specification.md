@@ -70,36 +70,20 @@ data["sector_volume_surge"] = detect_volume_surge(threshold=1.5)
 | agent_flash_verify() | 구현 완료 | - |
 | clean_for_blog() 이미지 보호 | 구현 완료 | - |
 
-#### 핵심 함수 스펙
+**agent_plan_structure(data: dict, score: float, topic: str) -> dict**
+- 역할: 전체 서사 설계도 및 데이터 필터링 수행
+- 모델: gemini-3-flash-preview
+- 출력: {structure_blueprint: {1~18: {logic, data_points}}}
 
-**detect_anchor(data: dict) -> dict**
-- 후보: NASDAQ_chg, VIX_chg, USD_KRW_chg, top_kr_sector 수익률
-- 선정 기준: abs() 값이 가장 큰 수치
-- 반환: {label, value, abs, direction, stats_line}
+**agent_write_blog(blueprint: dict, data: dict) -> dict**
+- 역할: 설계도 기반 블로그 전문 집필 (2,500자+)
+- 모델: gemini-3-pro-preview
+- 출력: {blog_draft, blog_images: []}
 
-**calculate_moneydaddy_score(data: dict) -> float**
-```
-Score = (100 - Fear_Greed) × 0.40
-      + max(0, 40 - VIX) × 2.5 × 0.20
-      + k_flow_normalized × 5 × 0.30
-      + tech_align × 100 × 0.10
-
-k_flow = avg(top_kr_returns) × 2, clamp(-10, 10)
-tech_align = (SOXX_chg + 5) / 10, clamp(0.0, 1.0)
-```
-
-**agent_pro_generate() 프롬프트 구조**
-```text
-[역할 선언]: Antigravity Ver 10.0 에이전트 (머니대디 수석 비서/시스템 아키텍트 페르소나)
-[입력 데이터]: score, anchor, pivot, title, raw_json
-[Sector Pivot 지시] (pivot 감지 시 조건부 삽입)
-[Ver 10.0 가이드라인]:
-  - Macro 80% + FVG 20% (단, 섹터/종목 분석용 렌즈 분리일 뿐 투자 비중 이원화 의도 아님)
-  - 블로그: 3~4줄 단락 분리, 핵심 통찰 볼드, 텍스트/숫자 없는 순수 이미지 4종 플레이스홀더 (Slate Blue 톤)
-  - 대본: 기승전결 18p 구조 (기 1~3, 승 4~9, 전 10~15, 결 16~18), [轉] 구간에 분량 50% 집중
-  - 대본 페르소나: 라이브 해설가 모드, 3000자 이상, 1:1 슬라이드 동기화([Slide XX]), 1.4배속 단호한 어투, 괄호 제거
-[JSON 스키마]: {blog_draft, ppt_script: {1~18: {title, body, visual}}}
-```
+**agent_write_ppt(blueprint: dict, data: dict) -> dict**
+- 역할: 설계도 기반 18p 고밀도 대본 집필 (3,500자+)
+- 모델: gemini-3-pro-preview
+- 출력: {ppt_script: {1~18: {title, audio_script, visual_elements}}}
 
 **agent_flash_verify() 검증 항목**
 - 검증 수치: VIX, NASDAQ_chg, SP500_chg, TNX_10Y, USD_KRW, Fear_Greed, KOSPI
@@ -141,22 +125,16 @@ tech_align = (SOXX_chg + 5) / 10, clamp(0.0, 1.0)
 | **슬레이트 블루 & 골드 컬러 팔레트** | **미구현** | 제목 색상을 골드로, 배경 그라데이션 적용 필요 |
 | **핵심 수치 거대 배치 (Anchor)** | **미구현** | 1p에 오늘의 Anchor 수치를 초대형 폰트로 배치 필요 |
 
-#### 구현 필요: 1p 썸네일 슬라이드 Anchor 수치 거대 배치
-```python
-# 1p 처리 시 Anchor 수치를 별도 텍스트박스로 초대형 배치
-from pptx.util import Pt, Emu
-GOLD = RGBColor(212, 175, 55)  # 골드 컬러
+#### 구현 상세: 차트 및 시각화
 
-if page_num == 1:
-    # Anchor 수치 거대 텍스트 (오른쪽 하단)
-    anchor_val = logic.get("anchor", {}).get("value", "")
-    txBox = slide.shapes.add_textbox(Inches(5), Inches(3), Inches(4), Inches(2))
-    tf = txBox.text_frame
-    tf.text = anchor_val
-    tf.paragraphs[0].font.size = Pt(72)
-    tf.paragraphs[0].font.color.rgb = GOLD
-    tf.paragraphs[0].font.bold = True
-```
+**create_chart_image(data_points, title, filename)**
+- 엔진: Matplotlib (Agg backend)
+- 스타일: Dark Theme (#1E2638), Gold Line (#D4AF37)
+- 위치: pptx_generator.py 내 11p, 15p 등 동적 삽입
+
+**generate_hybrid_thumbnail()**
+- 엔진: PIL (Pillow)
+- 로직: Image.open("assets/bg.png") → draw.text() (Shadow 효과 포함)
 
 ---
 
@@ -255,26 +233,26 @@ VERIFY_KEYS = [
 
 ### 5.1 Gemini Agent 1 (생성)
 ```
-모델: gemini-2.5-pro-preview-05-06
+모델: gemini-3-pro-preview
 response_mime_type: application/json
 입력 토큰 예상: ~2,000 tokens (raw_data JSON + 프롬프트)
-출력 토큰 예상: ~4,000 tokens (blog_draft + 18p 대본)
+출력 토큰 예상: ~6,000 tokens (blog_draft + 18p 대본)
 ```
 
 ### 5.2 Gemini Agent 2 (검증)
 ```
-모델: gemini-1.5-flash
+모델: gemini-3-flash-preview
 response_mime_type: application/json
 입력 토큰 예상: ~1,500 tokens
 출력 토큰 예상: ~300 tokens
 ```
 
 ### 5.3 일일 호출량 및 무료 한도
-| 항목 | 일일 호출 | 무료 한도 |
-|------|---------|----------|
-| Agent 1 (Pro) | 1~2회 | 50회/일 |
-| Agent 2 (Flash) | 1~2회 | 1,500회/일 |
-| 여유율 | 97% 이상 | 안전 |
+| 항목 | 일일 호출 | 무료 한도 | 비고 |
+|------|---------|----------|------|
+| Agent 1 (Pro) | 1~2회 | 50회/일 | Timeout 1200s, 3-Retry |
+| Agent 2 (Flash) | 1~2회 | 1,500회/일 | Timeout 1200s, 3-Retry |
+| 여유율 | 97% 이상 | 안전 | - |
 
 ---
 
@@ -283,7 +261,9 @@ response_mime_type: application/json
 | 상황 | 처리 방법 |
 |------|----------|
 | yfinance 수집 실패 | None으로 저장, 수치 표시 시 "N/A" 출력 |
-| Gemini API 호출 실패 | sys.exit(1)으로 파이프라인 즉시 중단 + history.json 기록 |
+| Gemini API 호출 실패 (503, 504) | 최대 3회 자동 재시도 (Exponential Backoff) 후 실패 시 중단 |
+| Gemini API 호출 실패 (429) | **Gemini 3 Flash 모델로 즉시 자동 폴백(Fallback)** 하여 작업 완수 |
+| Gemini API 기타 실패 | sys.exit(1)으로 파이프라인 즉시 중단 + history.json 기록 |
 | Agent 2 검증 실패 | 경고 출력 + 원본 콘텐츠 유지 (파이프라인 계속) |
 | gTTS 실패 | 해당 슬라이드 음성 Skip (None 반환) |
 | FFmpeg 배속 실패 | 원본 속도(1.0x) 파일로 폴백 |

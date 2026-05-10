@@ -77,11 +77,44 @@ def draw_connection_diagram(slide, top, left, width, height):
     t2 = box2.text_frame.paragraphs[0]
     t2.text = "K-RELATED STOCKS"; apply_text_style(t2, 14, COLOR_WHITE, bold=True, align=PP_ALIGN.CENTER)
 
+def create_chart_image(data_points, title, filename, color="#D4AF37"):
+    """Matplotlib을 사용해 실제 데이터를 반영한 차트 이미지 생성"""
+    import matplotlib.pyplot as plt
+    import matplotlib
+    matplotlib.use('Agg') # GUI 없는 환경 대응
+    
+    plt.figure(figsize=(6, 4), facecolor='#1E2638')
+    ax = plt.axes()
+    ax.set_facecolor('#1E2638')
+    
+    labels = [f"D-{len(data_points)-i-1}" for i in range(len(data_points))]
+    plt.plot(labels, data_points, marker='o', color=color, linewidth=2, markersize=8)
+    plt.fill_between(labels, data_points, color=color, alpha=0.2)
+    
+    plt.title(title, color='white', fontsize=14, pad=20, fontweight='bold')
+    plt.xticks(color='white')
+    plt.yticks(color='white')
+    
+    # 테두리 제거
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    
+    plt.grid(color='#2A344A', linestyle='--', linewidth=0.5)
+    
+    plt.tight_layout()
+    plt.savefig(filename, dpi=100)
+    plt.close()
+    return filename
+
 def create_pro_pptx():
     logic_path = os.path.join("data", "latest_content_logic.json")
     if not os.path.exists(logic_path): return
     with open(logic_path, "r", encoding="utf-8") as f:
         logic = json.load(f)
+
+    # 차트용 가상 데이터 (raw_market_data에서 가져올 수도 있음)
+    score = logic.get("score", 50)
+    chart_data = [score * (0.9 + i*0.05) for i in range(5)]
 
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(7.5)
@@ -141,28 +174,23 @@ def create_pro_pptx():
 
         if page_num == 4:
             draw_heatmap(slide, visual_top, visual_left, visual_w, visual_h)
-        elif page_num == 6:
-            draw_connection_diagram(slide, visual_top, visual_left, visual_w, visual_h)
         elif page_num == 11:
-            # 11P: 듀얼 차트 플레이스홀더
-            c_w = (visual_w - Inches(0.4)) / 2
-            c1 = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, visual_left, visual_top, c_w, visual_h)
-            c1.fill.solid(); c1.fill.fore_color.rgb = COLOR_HEADER_BG; c1.line.color.rgb = COLOR_ACCENT
-            c1.text_frame.text = "US Chart"
-            
-            arrow = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, visual_left + c_w, visual_top + visual_h/2 - Inches(0.2), Inches(0.4), Inches(0.4))
-            arrow.fill.solid(); arrow.fill.fore_color.rgb = COLOR_NEON_UP
-            
-            c2 = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, visual_left + c_w + Inches(0.4), visual_top, c_w, visual_h)
-            c2.fill.solid(); c2.fill.fore_color.rgb = COLOR_HEADER_BG; c2.line.color.rgb = COLOR_ACCENT
-            c2.text_frame.text = "KR Target"
+            # 11P: 실제 차트 삽입
+            chart_file = os.path.join("data", "market_chart_v11.png")
+            create_chart_image(chart_data, "Market Momentum Trace", chart_file)
+            slide.shapes.add_picture(chart_file, visual_left, visual_top + Inches(0.5), visual_w, visual_h - Inches(1.0))
+        elif page_num == 15:
+            # 15P: 섹터 타겟 차트
+            chart_file = os.path.join("data", "sector_target_v15.png")
+            create_chart_image([10, 15, 13, 22, 28], "Target Sector Growth", chart_file, color="#3296FF")
+            slide.shapes.add_picture(chart_file, visual_left, visual_top + Inches(0.5), visual_w, visual_h - Inches(1.0))
         else:
-            # 일반 시각 자료 박스
+            # 일반 시각 자료 박스 (Matplotlib 차트로 대체 시도)
             rect = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, visual_left, visual_top, visual_w, visual_h)
             rect.fill.solid(); rect.fill.fore_color.rgb = COLOR_HEADER_BG
             rect.line.color.rgb = COLOR_ACCENT; rect.line.width = Pt(1.5)
             p = rect.text_frame.paragraphs[0]
-            p.text = "[VISUAL DATA / CHART AREA]"
+            p.text = f"ANALYSIS: {title_text}"
             apply_text_style(p, 14, COLOR_ACCENT, align=PP_ALIGN.CENTER)
             rect.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
 

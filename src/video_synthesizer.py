@@ -83,20 +83,42 @@ def synthesize_video(slide_paths: list[str], audio_dir: str, output_path: str):
 
     clips = []
     for i, img_path in enumerate(slide_paths, start=1):
-        audio_path = os.path.join(audio_dir, f"slide_{i:02d}.mp3")
-        if os.path.exists(audio_path):
-            audio    = AudioFileClip(audio_path)
-            clip     = ImageClip(img_path, duration=audio.duration).with_audio(audio)
-        else:
-            clip = ImageClip(img_path, duration=3)
-        clips.append(clip)
+        try:
+            audio_path = os.path.join(audio_dir, f"slide_{i:02d}.mp3")
+            if os.path.exists(audio_path):
+                audio = AudioFileClip(audio_path)
+                if audio.duration > 0:
+                    clip = ImageClip(img_path, duration=audio.duration).with_audio(audio)
+                else:
+                    print(f"  [Warning] Slide {i} audio duration is 0. Using default 3s.")
+                    clip = ImageClip(img_path, duration=3)
+            else:
+                print(f"  [Warning] Slide {i} audio missing. Using default 3s.")
+                clip = ImageClip(img_path, duration=3)
+            clips.append(clip)
+        except Exception as e:
+            print(f"  [Error] Failed to process slide {i}: {e}")
+            # 에러 발생 시 3초 정지 화면으로라도 대체하여 전체 합성 실패 방지
+            clips.append(ImageClip(img_path, duration=3))
 
     if not clips:
+        print("[Error] No clips created. Synthesis aborted.")
         return
 
-    concatenate_videoclips(clips, method="compose").write_videofile(
-        output_path, fps=24, codec="libx264", audio_codec="aac", logger=None)
-    print(f"[Video] Saved -> {output_path}")
+    try:
+        final_video = concatenate_videoclips(clips, method="compose")
+        final_video.write_videofile(
+            output_path, 
+            fps=24, 
+            codec="libx264", 
+            audio_codec="aac", 
+            logger=None,
+            threads=4
+        )
+        print(f"[Video] Saved -> {output_path}")
+    except Exception as e:
+        print(f"  [CRITICAL ERROR] Final video concatenation failed: {e}")
+        raise e
 
 
 def main():

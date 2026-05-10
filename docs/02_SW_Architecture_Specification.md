@@ -76,32 +76,29 @@
 
 ### 3.4 Phase 2b — content_generator.py (핵심 AI 엔진)
 
-#### Dual-Agent 흐름
+#### 3-Step 하이브리드 흐름
 ```
 raw_market_data.json
         │
-   [Pre-processing]
-   ├─ detect_anchor()       : 최대 변동성 수치 선정
-   ├─ detect_sector_pivot() : 거래량 1.5배 폭증 섹터 감지
-   ├─ calculate_score()     : 머니대디 스코어 산출
-   └─ build_title()         : Pivot 유무에 따른 제목 생성
+   [Step 1: Structure Planning] ── Gemini 3 Flash
+   ├─ 데이터 필터링 (주제 연관성 분석)
+   ├─ 18p 슬라이드별 논리 설계 (Blueprint)
+   └─ 출력: {structure_plan, filtered_stats}
         │
-   [Agent 1: Gemini 2.5 Pro] ── 생성 에이전트
-   ├─ 입력: score, anchor, pivot, title, raw_data
-   ├─ 처리: 거시 서사 80% + FVG 20%(투자 비중 이원화 아님) + 기승전결 18p 대본(전 10~15p 50% 비중) + 블로그 이미지 제약(텍스트 배제)
-   └─ 출력: {blog_draft, ppt_script{1~18}}
+   [Step 2: Blog Content Writing] ── Gemini 3 Pro
+   ├─ 설계도 기반 블로그 전문 집필 (2,500자+)
+   └─ 출력: {blog_draft, blog_images}
         │
-   [Agent 2: Gemini 1.5 Flash] ── 검증 에이전트
-   ├─ 입력: Agent 1 결과 + key_figures(VIX, NASDAQ 등)
-   ├─ 처리: 수치 교차 검증, 오류 수정
-   └─ 출력: {is_clean, issues_found, blog_draft(수정본)}
+   [Step 3: PPT Script Writing] ── Gemini 3 Pro
+   ├─ 설계도 기반 18p 대본 집필 (3,500자+)
+   └─ 출력: {ppt_script: {1~18}}
         │
-   [Post-processing]
-   ├─ clean_for_blog()     : 이미지 플레이스홀더 보호 + 소괄호 제거
-   └─ 해시태그 15개 자동 삽입
+   [Matplotlib Engine]
+   ├─ 설계도 내 데이터 수치 추출
+   └─ 출력: {market_chart_v11.png, sector_chart_v15.png}
         │
    [저장]
-   ├─ data/latest_content_logic.json  (PPT 대본, 스코어 등)
+   ├─ data/latest_content_logic.json
    └─ outputs/YYYY-MM-DD/daily_content_draft.md
 ```
 
@@ -132,7 +129,8 @@ tech_align = (SOXX_chg + 5) / 10             [범위 0.0~1.0]
 - **출력:** outputs/YYYY-MM-DD/audio/
 
 ### 3.8 Phase 5 — thumbnail_generator.py
-- **역할:** 오늘의 핵심 수치/키워드로 썸네일 2종 생성
+- **역할:** 하이브리드 방식의 썸네일 2종 생성
+- **로직:** assets/ 내 AI 생성 배경 로드 → PIL로 제목 및 강조 텍스트 합성
 - **출력:** thumbnail_A_rational.png, thumbnail_B_emotional.png
 
 ### 3.9 Phase 6 — video_synthesizer.py

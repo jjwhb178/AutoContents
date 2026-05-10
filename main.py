@@ -103,17 +103,24 @@ def main():
         cg.run_content_generation(data, selected_topic)
     console.print("[bold green]✓[/bold green] Phase 2b | 기획/대본 생성 완료")
 
-    # Phase 2c: Confirm Gate
-    if not args.auto:
-        print_dashboard_preview()
-        if not Confirm.ask("\n[bold red]▶ 영상 및 PPT 합성을 진행하시겠습니까? (시간이 소요됩니다)[/bold red]"):
-            console.print("[bold yellow]작업이 일시 정지되었습니다. 텍스트 초안을 수정 후 다시 실행하세요.[/bold yellow]")
-            sys.exit(0)
-
-    # Phase 3-6: Media Synthesis
-    console.print("\n[bold cyan]=== 🎬 Media Synthesis Start ===[/bold cyan]")
+    # Phase 3a-b: PPTX Generation
+    console.print("\n[bold cyan]=== 🎨 PPTX Generation Start ===[/bold cyan]")
     run_step("Phase 3a | 데이터 시각화 차트 렌더링", f'"{py}" src/visual_generator.py')
     run_step("Phase 3b | PPT 레이아웃 엔진 (차트 및 Visual Text 적용)", f'"{py}" src/pptx_generator.py')
+
+    # Intermediate Approval Gate (New)
+    if not args.auto:
+        out_dir = get_output_dir()
+        ppt_file = os.path.join(out_dir, "daily_strategy_v2_5.pptx")
+        console.print(f"\n[bold green]✅ PPT 파일 생성 완료:[/bold green] [link file://{ppt_file}]{ppt_file}[/link]")
+        console.print("[bold yellow]※ 위 PPT 파일을 열어 레이아웃과 내용을 확인하세요.[/bold yellow]")
+        
+        if not Confirm.ask("\n[bold red]▶ 영상 합성을 진행하시겠습니까? (TTS + MP4 합성 시작)[/bold red]"):
+            console.print("[bold yellow]작업이 종료되었습니다. PPT 수정이 필요하면 수정 후 영상 합성 모듈을 별도 실행하세요.[/bold yellow]")
+            sys.exit(0)
+
+    # Phase 4-6: Media Synthesis
+    console.print("\n[bold cyan]=== 🎬 Video Synthesis Start ===[/bold cyan]")
     run_step("Phase 4  | 저음 보이스 TTS 합성", f'"{py}" src/tts_generator.py')
     run_step("Phase 5  | 하이브리드 썸네일 합성", f'"{py}" src/thumbnail_generator.py')
     run_step("Phase 6  | 고해상도 영상 합성 (MP4)", f'"{py}" src/video_synthesizer.py')

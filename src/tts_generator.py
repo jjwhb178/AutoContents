@@ -16,7 +16,7 @@ def load_ppt_script() -> list[str]:
     with open("data/latest_content_logic.json", "r", encoding="utf-8") as f:
         logic = json.load(f)
     script = logic.get("ppt_script", {})
-    return [script.get(str(i), {}).get("body", "") for i in range(1, 19)]
+    return [script.get(str(i), {}).get("audio_script", "") for i in range(1, 19)]
 
 
 def generate_tts_raw(text: str, output_path: str) -> bool:

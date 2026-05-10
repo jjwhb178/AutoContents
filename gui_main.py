@@ -5,7 +5,9 @@ import time
 import threading
 import subprocess
 import tkinter as tk
+from datetime import datetime
 from tkinter import ttk, scrolledtext, messagebox
+from PIL import Image, ImageTk
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 import market_data_collector as mdc
@@ -15,7 +17,7 @@ from output_paths import get_output_dir, get_path
 class MoneyDaddyGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("MoneyDaddy AI Content Factory - Mission Control")
+        self.root.title("MoneyDaddy AI Content Factory - Mission Control v14.0")
         self.root.geometry("1100x850")
         self.root.configure(bg="#1E2638")
         
@@ -35,98 +37,120 @@ class MoneyDaddyGUI:
         self.data = {}
         self.proposals = []
         self.confirmed_topic = None
+        self.has_draft = False
         
         self.create_widgets()
+        self.load_existing_session()
         
+    def load_existing_session(self):
+        try:
+            data_path = "data/raw_market_data.json"
+            if os.path.exists(data_path):
+                mtime = os.path.getmtime(data_path)
+                if datetime.fromtimestamp(mtime).date() == datetime.now().date():
+                    with open(data_path, "r", encoding="utf-8") as f:
+                        self.data = json.load(f)
+                    self.proposals = cg.propose_topics(self.data)
+                    if self.proposals:
+                        self.log("✅ 오늘 세션을 복구했습니다.")
+                        self.update_proposal_ui()
+                        
+            logic_path = "data/latest_content_logic.json"
+            if os.path.exists(logic_path):
+                with open(logic_path, "r", encoding="utf-8") as f:
+                    logic = json.load(f)
+                    self.confirmed_topic = f"[{logic.get('theme_analysis', '기존')}] {logic.get('title')}"
+                    self.has_draft = True
+                    self.lbl_topic_status.config(text=f"✓ 기존 기획 로드됨")
+                    self.btn_gen.config(state=tk.NORMAL)
+                    self.btn_media.config(state=tk.NORMAL)
+                    self.btn_open_folder.config(state=tk.NORMAL)
+        except Exception as e:
+            self.log(f"세션 복구 중 오류: {e}")
+
+    def update_proposal_ui(self):
+        self.txt_proposals.config(state=tk.NORMAL)
+        self.txt_proposals.delete(1.0, tk.END)
+        for p in self.proposals:
+            self.txt_proposals.insert(tk.END, f"{p['id']}. [{p['type']}] {p['title']}\n   └ {p['reason']}\n\n")
+        self.txt_proposals.config(state=tk.DISABLED)
+        
+        topic_titles = [f"[{p['type']}] {p['title']}" for p in self.proposals]
+        self.combo_topic['values'] = topic_titles
+        self.combo_topic.current(0)
+        self.btn_gen.config(state=tk.NORMAL)
+
     def create_widgets(self):
-        main_frame = ttk.Frame(self.root, padding=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        self.paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, bg="#1E2638", sashwidth=4)
+        self.paned.pack(fill=tk.BOTH, expand=True)
         
-        # Header
-        ttk.Label(main_frame, text="MoneyDaddy AI Mission Control Ver 12.5", style="Header.TLabel").pack(pady=(0, 5))
+        left_frame = ttk.Frame(self.paned, padding=10)
+        self.paned.add(left_frame, width=450)
         
-        # 1. Topic Proposal Section
-        prop_frame = ttk.LabelFrame(main_frame, text=" 1. 실시간 뉴스 분석 및 주제 제안 ", padding=10)
+        ttk.Label(left_frame, text="MoneyDaddy AI Mission Control v14.0", style="Header.TLabel").pack(pady=(0, 10), anchor="w")
+        
+        prop_frame = ttk.LabelFrame(left_frame, text=" 1. 실시간 뉴스 분석 및 주제 제안 ", padding=10)
         prop_frame.pack(fill=tk.X, pady=5)
         
         self.btn_fetch = ttk.Button(prop_frame, text="실시간 뉴스 수집 및 AI 제안 받기", command=self.start_fetch_proposals)
-        self.btn_fetch.pack(anchor="w", pady=5)
+        self.btn_fetch.pack(fill=tk.X, pady=5)
         
-        self.txt_proposals = scrolledtext.ScrolledText(prop_frame, height=5, bg="#2A344A", fg="#E0E0E0", font=("Malgun Gothic", 10))
+        self.txt_proposals = scrolledtext.ScrolledText(prop_frame, height=8, bg="#2A344A", fg="#E0E0E0", font=("Malgun Gothic", 10))
         self.txt_proposals.pack(fill=tk.X, pady=5)
         
         input_frame = ttk.Frame(prop_frame)
         input_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(input_frame, text="주제 선택: ").pack(side=tk.LEFT)
-        self.combo_topic = ttk.Combobox(input_frame, width=50, font=("Malgun Gothic", 10), state="readonly")
-        self.combo_topic.pack(side=tk.LEFT, padx=10)
-        self.combo_topic.bind("<<ComboboxSelected>>", lambda event: self.confirm_topic_input())
+        self.combo_topic = ttk.Combobox(input_frame, font=("Malgun Gothic", 10), state="readonly")
+        self.combo_topic.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.btn_confirm_topic = ttk.Button(input_frame, text="확정", width=8, command=self.confirm_topic_input)
+        self.btn_confirm_topic.pack(side=tk.LEFT, padx=(5, 0))
         
-        self.btn_confirm_topic = ttk.Button(input_frame, text="주제 확정", command=self.confirm_topic_input)
-        self.btn_confirm_topic.pack(side=tk.LEFT)
+        self.lbl_topic_status = ttk.Label(input_frame, text="주제를 선택해 주세요", foreground="#AAAAAA")
+        self.lbl_topic_status.pack(anchor="w", pady=2)
         
-        self.lbl_topic_status = ttk.Label(input_frame, text="", foreground="#00FF00", font=("Malgun Gothic", 10, "bold"))
-        self.lbl_topic_status.pack(side=tk.LEFT, padx=15)
+        gen_ctrl_frame = ttk.LabelFrame(left_frame, text=" 2. 콘텐츠 기획 및 PPT 생성 (검토 단계) ", padding=10)
+        gen_ctrl_frame.pack(fill=tk.X, pady=5)
         
-        # 2. Draft Generation Section
-        gen_frame = ttk.LabelFrame(main_frame, text=" 2. 자산 기획 리뷰 (Orchestration Preview) ", padding=10)
-        gen_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        self.btn_gen = ttk.Button(gen_ctrl_frame, text="▶ 콘텐츠 기획 + PPT 파일 생성 시작", command=self.start_generation, state=tk.DISABLED)
+        self.btn_gen.pack(fill=tk.X, pady=5)
         
-        gen_top_frame = ttk.Frame(gen_frame)
-        gen_top_frame.pack(fill=tk.X, pady=5)
+        self.btn_open_folder = ttk.Button(gen_ctrl_frame, text="📂 생성된 PPT 파일 확인하기 (폴더 열기)", command=self.open_output_folder, state=tk.DISABLED)
+        self.btn_open_folder.pack(fill=tk.X, pady=5)
         
-        self.btn_gen = ttk.Button(gen_top_frame, text="초안 기획 및 대시보드 로드 (주제 확정 필요)", command=self.start_generation, state=tk.DISABLED)
-        self.btn_gen.pack(side=tk.LEFT)
+        media_frame = ttk.LabelFrame(left_frame, text=" 3. 미디어 합성 (최종 영상 제작) ", padding=10)
+        media_frame.pack(fill=tk.X, pady=5)
         
-        ttk.Label(gen_top_frame, text=" 📝 AI 피드백:").pack(side=tk.LEFT, padx=(20, 5))
-        self.entry_feedback = ttk.Entry(gen_top_frame, width=40, font=("Malgun Gothic", 10))
-        self.entry_feedback.pack(side=tk.LEFT)
-        self.entry_feedback.bind("<Return>", lambda event: self.start_generation())
+        self.btn_media = ttk.Button(media_frame, text="🚀 [Confirm] 최종 영상 합성 시작 (TTS 포함)", command=self.start_media_synthesis, state=tk.DISABLED)
+        self.btn_media.pack(fill=tk.X, pady=5)
         
-        self.btn_regen = ttk.Button(gen_top_frame, text="피드백 반영하여 재기획", command=self.start_generation, state=tk.DISABLED)
-        self.btn_regen.pack(side=tk.LEFT, padx=5)
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(media_frame, variable=self.progress_var, maximum=100)
+        self.progress_bar.pack(fill=tk.X, pady=(10, 5))
         
-        # Notebook for Previews
-        self.notebook = ttk.Notebook(gen_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True, pady=5)
+        right_frame = ttk.Frame(self.paned, padding=10)
+        self.paned.add(right_frame)
+        
+        self.notebook = ttk.Notebook(right_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
         
         tab1 = ttk.Frame(self.notebook)
-        self.txt_preview_ppt = scrolledtext.ScrolledText(tab1, height=10, bg="#2A344A", fg="#E0E0E0", font=("Malgun Gothic", 10))
+        self.txt_preview_ppt = scrolledtext.ScrolledText(tab1, bg="#2A344A", fg="#E0E0E0", font=("Malgun Gothic", 10))
         self.txt_preview_ppt.pack(fill=tk.BOTH, expand=True)
         self.notebook.add(tab1, text=" PPT 및 대본 리뷰 ")
         
         tab2 = ttk.Frame(self.notebook)
-        self.txt_preview_blog = scrolledtext.ScrolledText(tab2, height=10, bg="#2A344A", fg="#E0E0E0", font=("Malgun Gothic", 10))
+        self.txt_preview_blog = scrolledtext.ScrolledText(tab2, bg="#2A344A", fg="#E0E0E0", font=("Malgun Gothic", 10))
         self.txt_preview_blog.pack(fill=tk.BOTH, expand=True)
         self.notebook.add(tab2, text=" 블로그 초안 리뷰 ")
         
         tab3 = ttk.Frame(self.notebook)
-        self.txt_preview_thumb = scrolledtext.ScrolledText(tab3, height=10, bg="#2A344A", fg="#E0E0E0", font=("Malgun Gothic", 10))
+        self.txt_preview_thumb = scrolledtext.ScrolledText(tab3, bg="#2A344A", fg="#E0E0E0", font=("Malgun Gothic", 10))
         self.txt_preview_thumb.pack(fill=tk.BOTH, expand=True)
-        self.notebook.add(tab3, text=" 썸네일 기획 리뷰 ")
+        self.notebook.add(tab3, text=" 썸네일/채널 기획 ")
         
-        # 3. Confirm & Media Synthesis Section
-        media_frame = ttk.LabelFrame(main_frame, text=" 3. 미디어 합성 및 종료 ", padding=10)
-        media_frame.pack(fill=tk.X, pady=5)
-        
-        btn_box = ttk.Frame(media_frame)
-        btn_box.pack(fill=tk.X)
-        
-        self.btn_media = ttk.Button(btn_box, text="🚀 [Confirm] 미디어 합성 시작 (영상/TTS/썸네일)", command=self.start_media_synthesis, state=tk.DISABLED)
-        self.btn_media.pack(side=tk.LEFT, pady=5)
-        
-        self.btn_open_folder = ttk.Button(btn_box, text="📂 결과물 폴더 열기", command=self.open_output_folder, state=tk.DISABLED)
-        self.btn_open_folder.pack(side=tk.LEFT, padx=10, pady=5)
-        
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(media_frame, variable=self.progress_var, maximum=100)
-        self.progress_bar.pack(fill=tk.X, pady=5)
-        
-        # Log Section
-        log_frame = ttk.LabelFrame(main_frame, text=" 시스템 로그 ", padding=10)
-        log_frame.pack(fill=tk.X, pady=5)
-        
-        self.txt_log = scrolledtext.ScrolledText(log_frame, height=5, bg="#10141E", fg="#00FF00", font=("Consolas", 9))
+        log_frame = ttk.LabelFrame(right_frame, text=" 시스템 실시간 로그 ", padding=10)
+        log_frame.pack(fill=tk.X, pady=(10, 0))
+        self.txt_log = scrolledtext.ScrolledText(log_frame, height=12, bg="#10141E", fg="#00FF00", font=("Consolas", 9))
         self.txt_log.pack(fill=tk.X)
         
     def log(self, msg):
@@ -141,245 +165,134 @@ class MoneyDaddyGUI:
             try:
                 res = target()
                 self.root.after(0, lambda: on_complete(res))
-            except subprocess.CalledProcessError as e:
-                err_msg = f"외부 프로그램(TTS, FFMPEG 등) 실행 중 오류가 발생했습니다.\n\n[상세 내용]\n{e.stderr[-200:] if e.stderr else str(e)}"
-                self.root.after(0, lambda: messagebox.showerror("시스템 실행 오류", err_msg))
-                self.root.after(0, lambda: self.set_buttons_state(tk.NORMAL))
             except Exception as e:
-                err_msg = f"작업 처리 중 예기치 않은 오류가 발생했습니다.\nAPI 연동 문제이거나 데이터 형식 오류일 수 있습니다.\n\n[에러 메시지]\n{str(e)}"
-                self.root.after(0, lambda: messagebox.showerror("처리 오류", err_msg))
+                self.root.after(0, lambda: messagebox.showerror("오류", str(e)))
                 self.root.after(0, lambda: self.set_buttons_state(tk.NORMAL))
         threading.Thread(target=wrapper, daemon=True).start()
 
     def set_buttons_state(self, state):
         self.btn_fetch.config(state=state)
         self.btn_confirm_topic.config(state=state)
-        if self.confirmed_topic:
-            self.btn_gen.config(state=state)
-        if hasattr(self, 'has_draft') and self.has_draft:
-            self.btn_regen.config(state=state)
-            self.btn_media.config(state=state)
+        if self.confirmed_topic: self.btn_gen.config(state=state)
+        if self.has_draft: self.btn_media.config(state=state)
 
     def confirm_topic_input(self):
-        selected_topic = self.combo_topic.get()
-        if not selected_topic:
-            messagebox.showwarning("경고", "주제를 선택하세요.")
-            return
-            
-        self.confirmed_topic = selected_topic
-        self.lbl_topic_status.config(text=f"✓ 확정됨: {selected_topic[:20]}...")
-        self.log(f"주제 확정 완료: {selected_topic}")
-        
-        self.btn_gen.config(state=tk.NORMAL, text="▶ 초안 기획 시작하기")
+        self.confirmed_topic = self.combo_topic.get()
+        if self.confirmed_topic:
+            self.lbl_topic_status.config(text=f"✓ 확정: {self.confirmed_topic[:25]}...")
+            self.btn_gen.config(state=tk.NORMAL)
 
-    # --- Phase 1 ---
     def start_fetch_proposals(self):
         self.set_buttons_state(tk.DISABLED)
-        self.btn_fetch.config(text="데이터 수집 중...")
-        self.log("데이터 수집 및 주제 분석 시작...")
-        
-        self.txt_proposals.config(state=tk.NORMAL)
-        self.txt_proposals.delete(1.0, tk.END)
-        self.txt_proposals.config(state=tk.DISABLED)
-        
         def task():
             mdc.main()
-            with open("data/raw_market_data.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-            proposals = cg.propose_topics(data)
-            return data, proposals
-            
+            with open("data/raw_market_data.json", "r", encoding="utf-8") as f: data = json.load(f)
+            return data, cg.propose_topics(data)
         def on_done(res):
             self.data, self.proposals = res
-            self.log("주제 제안 완료.")
-            
-            self.txt_proposals.config(state=tk.NORMAL)
-            for p in self.proposals:
-                self.txt_proposals.insert(tk.END, f"{p['id']}. [{p['type']}] {p['title']}\n   └ {p['reason']}\n\n")
-            self.txt_proposals.config(state=tk.DISABLED)
-            
-            if self.proposals:
-                topic_titles = [f"[{p['type']}] {p['title']}" for p in self.proposals]
-                self.combo_topic['values'] = topic_titles
-                self.combo_topic.current(0)
-            
+            self.update_proposal_ui()
             self.set_buttons_state(tk.NORMAL)
-            self.btn_fetch.config(text="실시간 뉴스 수집 및 AI 제안 받기")
-                
         self.run_thread(task, on_done)
 
-    # --- Phase 2 ---
     def start_generation(self):
-        if not self.confirmed_topic:
-            messagebox.showwarning("경고", "먼저 주제를 입력하고 [입력 확인]을 누르세요.")
-            return
-            
         self.set_buttons_state(tk.DISABLED)
-        self.log("고밀도 자산 기획 중... (Agent 1 & 2)")
-        self.btn_gen.config(text="초안 생성 중 (약 30초 소요)...")
-        
-        self.txt_preview_ppt.config(state=tk.NORMAL)
-        self.txt_preview_blog.config(state=tk.NORMAL)
-        self.txt_preview_thumb.config(state=tk.NORMAL)
-        self.txt_preview_ppt.delete(1.0, tk.END)
-        self.txt_preview_blog.delete(1.0, tk.END)
-        self.txt_preview_thumb.delete(1.0, tk.END)
-        self.txt_preview_ppt.config(state=tk.DISABLED)
-        self.txt_preview_blog.config(state=tk.DISABLED)
-        self.txt_preview_thumb.config(state=tk.DISABLED)
+        self.log("💡 콘텐츠 기획 및 PPT 파일 생성을 시작합니다...")
         
         def task():
-            feedback = self.entry_feedback.get().strip()
-            # 1. AI 콘텐츠 기획 및 블로그 초안 생성 실행 (내부적으로 markdown 파일 저장)
-            cg.run_content_generation(self.data, self.confirmed_topic, feedback=feedback)
+            # 1. AI 기획안 생성
+            cg.run_content_generation(self.data, self.confirmed_topic)
             
-            # 2. 저장된 JSON 로직 (PPT 대본, 썸네일, 이미지 프롬프트 등) 로드
+            # 2. 썸네일, 차트, PPT 즉시 생성 (사용자 요청 반영)
+            py = sys.executable
+            self.root.after(0, lambda: self.log("🎨 썸네일 및 시각 자료 생성 중..."))
+            subprocess.run(f'"{py}" src/thumbnail_generator.py', shell=True, check=True)
+            subprocess.run(f'"{py}" src/visual_generator.py', shell=True, check=True)
+            self.root.after(0, lambda: self.log("📊 PPTX 파일 빌드 중..."))
+            subprocess.run(f'"{py}" src/pptx_generator.py', shell=True, check=True)
+            
             with open("data/latest_content_logic.json", "r", encoding="utf-8") as f:
-                logic = json.load(f)
+                return json.load(f)
                 
-            # 3. 생성된 블로그 초안 (Markdown) 파일 읽기
-            blog_path = get_path("daily_content_draft.md")
-            blog_text = ""
-            if os.path.exists(blog_path):
-                with open(blog_path, "r", encoding="utf-8") as f:
-                    blog_text = f.read()
-            return logic, blog_text
-                
-        def on_done(res):
-            logic, blog_text = res
-            self.log("기획 생성 완료. Confirm 대기 중.")
-            
-            self.txt_preview_ppt.config(state=tk.NORMAL)
-            self.txt_preview_blog.config(state=tk.NORMAL)
-            self.txt_preview_thumb.config(state=tk.NORMAL)
-            
-            # --- 이미지 렌더링용 변수 초기화 ---
-            if not hasattr(self, 'img_refs'):
-                self.img_refs = []
-            self.img_refs.clear() # 가비지 컬렉션 방지 리스트 초기화
-            
-            def insert_image_if_exists(txt_widget, img_name):
-                img_path = get_path(img_name)
-                if os.path.exists(img_path):
-                    from PIL import Image, ImageTk
-                    try:
-                        img = Image.open(img_path)
-                        img.thumbnail((500, 300)) # GUI 맞춤 크기 조절
-                        tk_img = ImageTk.PhotoImage(img)
-                        self.img_refs.append(tk_img)
-                        txt_widget.image_create(tk.END, image=tk_img)
-                        txt_widget.insert(tk.END, "\n\n")
-                    except Exception as e:
-                        txt_widget.insert(tk.END, f"[이미지 로드 실패: {img_name}]\n\n")
-            
-            # 1. PPT Preview
-            self.txt_preview_ppt.insert(tk.END, f"■ 제목: {logic.get('title')}\n")
-            self.txt_preview_ppt.insert(tk.END, f"■ 테마 요약: {logic.get('theme_analysis')}\n")
-            self.txt_preview_ppt.insert(tk.END, "-"*80 + "\n\n")
-            
-            script = logic.get("ppt_script", {})
-            for i in range(1, 19):
-                p = script.get(str(i))
-                if p:
-                    self.txt_preview_ppt.insert(tk.END, f"=========================================\n")
-                    self.txt_preview_ppt.insert(tk.END, f" [{i}P] {p.get('title', '')}\n")
-                    self.txt_preview_ppt.insert(tk.END, f" * Layout: {p.get('layout_type', 'bullets')}\n")
-                    self.txt_preview_ppt.insert(tk.END, f"=========================================\n")
-                    
-                    v_elems = p.get('visual_elements', [])
-                    if isinstance(v_elems, list):
-                        for el in v_elems:
-                            self.txt_preview_ppt.insert(tk.END, f"   - {el}\n")
-                    else:
-                        self.txt_preview_ppt.insert(tk.END, f"   - {v_elems}\n")
-                    
-                    self.txt_preview_ppt.insert(tk.END, f"\n 🎙️ 대본: {p.get('audio_script', '')}\n\n")
-                    
-            # 2. Blog Preview (텍스트 기반)
-            self.txt_preview_blog.insert(tk.END, f"■ 블로그 기획 요약 (순수 본문 2,500자 타겟)\n")
-            self.txt_preview_blog.insert(tk.END, "-"*80 + "\n\n")
-            
-            # 블로그 이미지 프롬프트 추출 (캡션 + 프롬프트 매핑 딕셔너리 생성)
-            blog_images = {
-                f"[IMAGE_{img['id']}_PLACEHOLDER]": f"캡션: {img.get('caption_ko', '')}\n   🎨 프롬프트: {img.get('prompt', '')}" 
-                for img in logic.get('blog_images', [])
-            }
-            
-            paragraphs = blog_text.split('\n\n')
-            for para in paragraphs:
-                # 플레이스홀더를 찾아서 기획 의도와 프롬프트로 교체하여 보여줌
-                display_para = para
-                for placeholder, prompt_text in blog_images.items():
-                    if placeholder in display_para:
-                        display_para = display_para.replace(placeholder, f"\n\n[📷 이미지 기획]\n   📝 {prompt_text}\n")
-                
-                self.txt_preview_blog.insert(tk.END, display_para + "\n\n")
-            
-            # 3. Thumbnail Preview
-            thumb = logic.get("thumbnail_prompts", {})
-            self.txt_preview_thumb.insert(tk.END, f"■ 썸네일 기획 의도 및 시각적 묘사 (Korean):\n{thumb.get('concept_ko', '')}\n\n")
-            self.txt_preview_thumb.insert(tk.END, f"■ 영문 프롬프트 (이성적):\n{thumb.get('rational_prompt_en', '')}\n\n")
-            
-            # 유튜브 설명도 여기에 추가
-            self.txt_preview_thumb.insert(tk.END, f"■ 유튜브 설명란/타임라인:\n{logic.get('youtube_desc', '')}\n")
-            
-            self.txt_preview_ppt.config(state=tk.DISABLED)
-            self.txt_preview_blog.config(state=tk.DISABLED)
-            self.txt_preview_thumb.config(state=tk.DISABLED)
-            
+        def on_done(logic):
+            self.log("✅ PPT 파일 생성이 완료되었습니다! 폴더를 열어 확인해 주세요.")
             self.has_draft = True
             self.set_buttons_state(tk.NORMAL)
-            self.btn_gen.config(text="초안 기획 완료 (새로 생성)")
-            self.btn_regen.config(state=tk.NORMAL)
-            self.btn_media.config(state=tk.NORMAL)
-            self.notebook.select(0) # Focus PPT tab
+            self.btn_open_folder.config(state=tk.NORMAL)
+            self.update_preview(logic)
+            self.open_output_folder() # 편의를 위해 즉시 폴더 열기
             
         self.run_thread(task, on_done)
 
-    # --- Phase 3 ---
+    def update_preview(self, logic):
+        # 1. PPT 및 대본 리뷰 탭
+        self.txt_preview_ppt.config(state=tk.NORMAL)
+        self.txt_preview_ppt.delete(1.0, tk.END)
+        
+        if not hasattr(self, 'img_refs'): self.img_refs = []
+        self.img_refs.clear()
+        
+        def add_img(name):
+            path = get_path(name)
+            if os.path.exists(path):
+                img = Image.open(path)
+                img.thumbnail((450, 250))
+                tk_img = ImageTk.PhotoImage(img)
+                self.img_refs.append(tk_img)
+                self.txt_preview_ppt.image_create(tk.END, image=tk_img)
+                self.txt_preview_ppt.insert(tk.END, "\n")
+
+        self.txt_preview_ppt.insert(tk.END, f"■ 확정 주제: {logic.get('title')}\n\n")
+        self.txt_preview_ppt.insert(tk.END, "📸 [디자인 프리뷰: 확정된 페르소나 썸네일]\n")
+        add_img("thumbnail_A_rational.png")
+        add_img("thumbnail_B_emotional.png")
+        self.txt_preview_ppt.insert(tk.END, "\n" + "="*60 + "\n")
+        
+        script = logic.get("ppt_script", {})
+        for i in range(1, 19):
+            p = script.get(str(i))
+            if p:
+                self.txt_preview_ppt.insert(tk.END, f"[{i}P] {p.get('title')}\n🎙️ 대본: {p.get('audio_script')}\n\n")
+        self.txt_preview_ppt.config(state=tk.DISABLED)
+
+        # 2. 블로그 초안 리뷰 탭
+        self.txt_preview_blog.config(state=tk.NORMAL)
+        self.txt_preview_blog.delete(1.0, tk.END)
+        blog_path = get_path("daily_content_draft.md")
+        if os.path.exists(blog_path):
+            with open(blog_path, "r", encoding="utf-8") as f:
+                self.txt_preview_blog.insert(tk.END, f.read())
+        self.txt_preview_blog.config(state=tk.DISABLED)
+
+        # 3. 썸네일/채널 기획 탭
+        self.txt_preview_thumb.config(state=tk.NORMAL)
+        self.txt_preview_thumb.delete(1.0, tk.END)
+        thumb = logic.get("thumbnail_prompts", {})
+        self.txt_preview_thumb.insert(tk.END, f"■ 썸네일 컨셉:\n{thumb.get('concept_ko', '')}\n\n")
+        self.txt_preview_thumb.insert(tk.END, f"■ 유튜브 제목/설명란:\n{logic.get('youtube_desc', '')}\n")
+        self.txt_preview_thumb.config(state=tk.DISABLED)
+
     def start_media_synthesis(self):
-        if not os.path.exists("data/latest_content_logic.json"):
-            messagebox.showwarning("경고", "먼저 초안을 생성하세요.")
+        if not messagebox.askyesno("최종 확인", "PPT 내용을 모두 확인하셨나요?\n'예'를 누르면 TTS 및 영상 합성을 시작합니다."):
             return
             
         self.set_buttons_state(tk.DISABLED)
-        self.btn_media.config(text="미디어 합성 진행 중...")
-        self.log("미디어 합성 시작 (비동기)")
-        py = sys.executable
-        
         def task():
-            steps = [
-                ("PPT 생성", f'"{py}" src/pptx_generator.py'),
-                ("TTS 합성", f'"{py}" src/tts_generator.py'),
-                ("썸네일 생성", f'"{py}" src/thumbnail_generator.py'),
-                ("영상 합성", f'"{py}" src/video_synthesizer.py')
-            ]
-            total_steps = len(steps)
-            for idx, (name, cmd) in enumerate(steps):
-                self.root.after(0, lambda n=name: self.log(f"진행 중: {n}..."))
-                subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
-                progress = int(((idx + 1) / total_steps) * 100)
-                self.root.after(0, lambda p=progress: self.progress_var.set(p))
+            py = sys.executable
+            self.root.after(0, lambda: self.log("🎙️ TTS 음성 합성 중... (약 1분 소요)"))
+            subprocess.run(f'"{py}" src/tts_generator.py', shell=True, check=True)
+            self.root.after(0, lambda: self.log("🎬 최종 영상 렌더링 중... (고부하 작업)"))
+            subprocess.run(f'"{py}" src/video_synthesizer.py', shell=True, check=True)
             return True
-            
         def on_done(res):
-            out_dir = get_output_dir()
-            self.log(f"모든 파이프라인 완료! 결과물 폴더: {out_dir}")
-            self.btn_open_folder.config(state=tk.NORMAL)
+            self.log("🎉 모든 영상 제작이 완료되었습니다!")
             self.set_buttons_state(tk.NORMAL)
-            self.btn_media.config(text="🚀 [Confirm] 미디어 합성 시작 (영상/TTS/썸네일)")
-            messagebox.showinfo("합성 완료", "미디어 생성이 완벽하게 끝났습니다!\n'결과물 폴더 열기' 버튼을 눌러 확인하세요.")
-            
+            messagebox.showinfo("완료", "최종 영상 생성이 완료되었습니다.")
         self.run_thread(task, on_done)
 
     def open_output_folder(self):
         out_dir = os.path.abspath(get_output_dir())
-        if sys.platform == "win32":
-            os.startfile(out_dir)
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", out_dir])
-        else:
-            subprocess.Popen(["xdg-open", out_dir])
+        if sys.platform == "win32": os.startfile(out_dir)
+        else: subprocess.Popen(["xdg-open", out_dir])
 
 if __name__ == "__main__":
     root = tk.Tk()

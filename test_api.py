@@ -7,8 +7,8 @@ import google.generativeai as genai
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 sys.path.insert(0, "src")
 from content_generator import (
-    detect_anchor, detect_sector_pivot,
-    calculate_moneydaddy_score, build_title
+    detect_sector_pivot,
+    calculate_moneydaddy_score
 )
 
 with open("data/raw_market_data.json", "r", encoding="utf-8") as f:
@@ -28,22 +28,18 @@ def clean_nan(d):
 data = clean_nan(data)
 
 score = calculate_moneydaddy_score(data)
-anchor = detect_anchor(data)
 pivot = detect_sector_pivot(data)
-title = build_title(data, score, data.get("top_kr_sectors", []), pivot)
 
 print(f"Score: {score}")
-print(f"Anchor: {anchor}")
 print(f"Pivot: {pivot}")
-print(f"Title: {title}")
 
 # Check prompt size
 data_json = json.dumps(data, ensure_ascii=False)
 print(f"\nData JSON size: {len(data_json)} chars")
 
-# Try a simpler prompt first
+# Try using the new Gemini 3 Flash model
 model = genai.GenerativeModel(
-    "gemini-2.5-flash",
+    "gemini-3-pro-preview",
     generation_config={"response_mime_type": "application/json"}
 )
 
@@ -52,7 +48,6 @@ simple_prompt = f"""
 
 시장 데이터: {data_json}
 머니대디 스코어: {score}점
-앵커: {anchor['label']} {anchor['value']}
 
 아래 JSON 형식으로 블로그 초안과 PPT 대본(18페이지)을 생성하세요.
 블로그는 거시 경제 서사 70%, FVG 타점 30%로 구성하세요.
