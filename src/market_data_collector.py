@@ -105,54 +105,120 @@ def get_us_sector_returns():
     return results
 
 
-# ── 한국 주도 섹터 추정: yfinance 대형 ETF 활용 ─────────────────────────────
-KR_SECTOR_TICKERS = {
-    "반도체": "005930.KS",   # 삼성전자
-    "AI/소프트웨어": "035420.KS",  # NAVER
-    "2차전지": "373220.KS",  # LG에너지솔루션
-    "바이오": "207940.KS",   # 삼성바이오로직스
-    "로봇/자동화": "066570.KS",  # LG전자
-    "자동차": "005380.KS",   # 현대차
-    "방산": "047810.KS",     # 한국항공우주
-    "금융": "105560.KS",     # KB금융
-}
-
-def get_kr_sector_returns():
-    results = {}
-    for name, ticker in KR_SECTOR_TICKERS.items():
-        try:
-            hist = yf.Ticker(ticker).history(period="2d")
-            if len(hist) >= 2:
-                prev, curr = hist["Close"].iloc[-2], hist["Close"].iloc[-1]
-                results[name] = round((curr - prev) / prev * 100, 2)
-            else:
-                results[name] = None
-        except Exception:
-            results[name] = None
-    return results
-
-
-# ── Sector Pivot: 거래량 폭증 섹터 감지 ───────────────────────────────────────
-def detect_volume_surge(threshold: float = 1.5) -> list:
+# ── 실시간 주도 섹터 및 거래대금 1위 종목 수집 ───────────────────────────────
+def get_realtime_sector_leaderboard(limit=3):
     """
-    전일 대비 거래량이 threshold배 이상인 KR 섹터를 감지.
-    반환: [{"name": "로봇/자동화", "volume_ratio": 2.1}, ...] 내림차순
-    content_generator.detect_sector_pivot()의 입력 데이터.
+    네이버 금융 테마 시세를 파싱하여 당일 주도 테마와 거래대금 1위 종목 정보를 반환합니다.
     """
-    surges = []
-    for name, ticker in KR_SECTOR_TICKERS.items():
-        try:
-            hist = yf.Ticker(ticker).history(period="3d")
-            if len(hist) >= 2:
-                prev_vol = hist["Volume"].iloc[-2]
-                curr_vol = hist["Volume"].iloc[-1]
-                if prev_vol and prev_vol > 0:
-                    ratio = round(curr_vol / prev_vol, 2)
-                    if ratio >= threshold:
-                        surges.append({"name": name, "volume_ratio": ratio})
-        except Exception:
-            pass
-    return sorted(surges, key=lambda x: x["volume_ratio"], reverse=True)
+    print(f"  Fetching realtime sector leaderboard (limit={limit})...")
+    leaderboard = []
+    try:
+        url = "https://finance.naver.com/sise/theme.naver?field=change_price&ordering=desc"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4280.88 Safari/537.36"
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        r.encoding = "euc-kr"
+        
+        soup = BeautifulSoup(r.text, "html.parser")
+        table = soup.select_one("table.theme")
+        if not table:
+            print("  [Sector Leaderboard] Failed to find table.theme")
+            return []
+            
+        rows = table.select("tr")
+        count = 0
+        for row in rows:
+            if count >= limit:
+                break
+                
+            a_tag = row.select_one("td.col_path a")
+            if not a_tag:
+                continue
+                
+            sector_name = a_tag.get_text(strip=True)
+            href = a_tag.get("href")
+            if not href:
+                continue
+                
+            # 등락률 파싱
+            change_pct = 0.0
+            found_pct = False
+            for td in row.select("td"):
+                text = td.get_text(strip=True)
+                if "%" in text:
+                    try:
+                        val_str = text.replace("%", "").replace("+", "").replace(",", "").strip()
+                        change_pct = float(val_str)
+                        found_pct = True
+                        break
+                    except ValueError:
+                        pass
+            if not found_pct:
+                num_td = row.select_one("td.number")
+                if num_td:
+                    try:
+                        val_str = num_td.get_text(strip=True).replace("+", "").replace(",", "").strip()
+                        change_pct = float(val_str)
+                    except ValueError:
+                        pass
+            
+            # 상세 페이지 링크로 진입하여 거래대금 1위 종목 파싱
+            detail_url = "https://finance.naver.com" + href
+            try:
+                dr = requests.get(detail_url, headers=headers, timeout=10)
+                dr.encoding = "euc-kr"
+                detail_soup = BeautifulSoup(dr.text, "html.parser")
+                
+                detail_rows = detail_soup.select("table.type_5 tr")
+                stocks = []
+                for d_row in detail_rows:
+                    tds = d_row.select("td")
+                    if len(tds) > 8:
+                        a_stock = tds[0].select_one("a")
+                        if not a_stock:
+                            continue
+                        stock_name = a_stock.get_text(strip=True)
+                        val_str = tds[8].get_text(strip=True)
+                        val_clean = val_str.replace(",", "").strip()
+                        if not val_clean:
+                            continue
+                        try:
+                            val_float = float(val_clean)
+                            stocks.append({
+                                "name": stock_name,
+                                "value_num": val_float,
+                                "value_str": val_str + "백만"
+                            })
+                        except ValueError:
+                            pass
+                
+                if stocks:
+                    stocks.sort(key=lambda x: x["value_num"], reverse=True)
+                    top_stock = stocks[0]["name"]
+                    top_stock_value = stocks[0]["value_str"]
+                else:
+                    top_stock = "N/A"
+                    top_stock_value = "0백만"
+                    
+            except Exception as e:
+                print(f"  [Sector Leaderboard] Failed to fetch details for {sector_name}: {e}")
+                top_stock = "N/A"
+                top_stock_value = "0백만"
+                
+            leaderboard.append({
+                "sector": sector_name,
+                "change_pct": change_pct,
+                "top_stock": top_stock,
+                "top_stock_value": top_stock_value
+            })
+            count += 1
+            
+    except Exception as e:
+        print(f"  [Sector Leaderboard] Failed to fetch sector leaderboard: {e}")
+        
+    return leaderboard
+
 
 
 def get_base_indicators():
@@ -193,25 +259,25 @@ def main():
     print("  Fetching US sector ETF returns...")
     data["us_sectors"] = get_us_sector_returns()
 
-    print("  Fetching KR sector proxy returns...")
-    data["kr_sectors"] = get_kr_sector_returns()
+    print("  Fetching KR realtime sector leaderboard...")
+    realtime_sectors = get_realtime_sector_leaderboard(limit=3)
+    data["realtime_sectors"] = realtime_sectors
+
+    # 하위 호환성 유지
+    data["kr_sectors"] = {item["sector"]: item["change_pct"] for item in realtime_sectors}
+    data["top_kr_sectors"] = [[item["sector"], item["change_pct"]] for item in realtime_sectors]
+    data["bottom_kr_sectors"] = []
 
     data["timestamp"] = datetime.now().isoformat()
 
-    # 주도 섹터 TOP3 (수익률 높은 순)
-    kr = {k: v for k, v in data["kr_sectors"].items() if v is not None}
-    sorted_kr = sorted(kr.items(), key=lambda x: x[1], reverse=True)
-    data["top_kr_sectors"]    = sorted_kr[:3]   # [(섹터명, 수익률), ...]
-    data["bottom_kr_sectors"] = sorted_kr[-2:]  # 하락 섹터
-
-    # ── Sector Pivot: 거래량 1.5배 폭증 섹터 감지 ──────────────────────────
-    print("  Detecting volume surge sectors (Sector Pivot)...")
-    surges = detect_volume_surge(threshold=1.5)
+    # ── Sector Pivot: 거래량 폭증 섹터 감지 대체 (실시간 테마 매핑) ──────────────────
+    print("  Mapping realtime sectors to volume surge (Sector Pivot)...")
+    surges = [{"name": item["sector"], "volume_ratio": item["change_pct"]} for item in realtime_sectors]
     data["sector_volume_surge"] = surges
     if surges:
         print(f"  [PIVOT] 감지: {[s['name'] + ' x' + str(s['volume_ratio']) for s in surges]}")
     else:
-        print("  [PIVOT] 해당 없음 (1.5배 폭증 섹터 없음)")
+        print("  [PIVOT] 해당 없음")
 
     # ── NaN 정제: yfinance가 반환하는 NaN/numpy 값을 None으로 변환 ──────────
     import math
