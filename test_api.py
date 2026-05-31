@@ -7,8 +7,7 @@ import google.generativeai as genai
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 sys.path.insert(0, "src")
 from content_generator import (
-    detect_sector_pivot,
-    calculate_moneydaddy_score
+    detect_sector_pivot
 )
 
 with open("data/raw_market_data.json", "r", encoding="utf-8") as f:
@@ -27,7 +26,7 @@ def clean_nan(d):
 
 data = clean_nan(data)
 
-score = calculate_moneydaddy_score(data)
+score = data.get("score", 50.0)
 pivot = detect_sector_pivot(data)
 
 print(f"Score: {score}")
@@ -39,7 +38,7 @@ print(f"\nData JSON size: {len(data_json)} chars")
 
 # Try using the new Gemini 3 Flash model
 model = genai.GenerativeModel(
-    "gemini-3-pro-preview",
+    "gemini-2.5-pro",
     generation_config={"response_mime_type": "application/json"}
 )
 
@@ -50,7 +49,7 @@ simple_prompt = f"""
 머니대디 스코어: {score}점
 
 아래 JSON 형식으로 블로그 초안과 PPT 대본(18페이지)을 생성하세요.
-블로그는 거시 경제 서사 70%, FVG 타점 30%로 구성하세요.
+블로그는 거시 경제 서사와 자금 흐름(수급) 및 과거 백데이터 추이를 중심으로 구성하세요.
 대본은 구어체 라이브 해설가 모드이고, 괄호와 기호를 모두 제거하세요.
 
 JSON:

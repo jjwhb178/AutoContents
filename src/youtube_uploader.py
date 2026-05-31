@@ -103,11 +103,11 @@ def main():
     title = f"[머니대디] {date} 스코어 {score}점 – 오늘 9시 {mood} 전략 공개"
     description = (
         f"오늘의 머니대디 스코어: {score}점 ({mood} 시장)\n\n"
-        "글로벌 심리 → 미국 마감 결과 → 한국 대응 타점을 연결하는 "
+        "글로벌 심리 → 미국 마감 결과 → 한국 시장 수급 흐름을 연결하는 "
         "머니대디의 아침 전략 콘텐츠입니다.\n\n"
-        "#오늘주식전망 #머니대디 #KOSPI #주도주분석 #FVG타점"
+        "#오늘주식전망 #머니대디 #KOSPI #주도주분석 #주도주수급 #거시경제"
     )
-    tags = ["오늘의주식전망", "머니대디", "주식", "KOSPI", "주도주", "FVG"]
+    tags = ["오늘의주식전망", "머니대디", "주식", "KOSPI", "주도주", "주도주수급", "거시경제"]
 
     video_path     = os.path.join("outputs", "daily_video.mp4")
     thumbnail_path = os.path.join("outputs", "thumbnail.png")

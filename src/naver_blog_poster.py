@@ -43,7 +43,7 @@ def load_blog_draft() -> dict:
 
     # 줄바꿈 → <br> 변환 (Naver 에디터 호환)
     body_html = raw.replace("\n", "<br>")
-    tags = "오늘의주식전망,머니대디,주식,KOSPI,주도주분석,FVG"
+    tags = "오늘의주식전망,머니대디,주식,KOSPI,주도주분석,주도주수급,경제동향"
 
     return {"title": title, "body_html": body_html, "tags": tags}
 
