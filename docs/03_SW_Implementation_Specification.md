@@ -57,84 +57,35 @@ data["sector_volume_surge"] = detect_volume_surge(threshold=1.5)
 
 ---
 
-### 2.2 content_generator.py
+### 2.2 content_generator.py (신규: Fact-Grounding Engine)
 
-#### 현황 및 GAP
-| 기능 | 구현 상태 | GAP |
-|------|----------|-----|
-| detect_anchor() | 구현 완료 | - |
-| calculate_moneydaddy_score() | 구현 완료 | - |
-| detect_sector_pivot() | 구현 완료 | market_data_collector의 sector_volume_surge 데이터 필요 |
-| build_title() with Pivot | 구현 완료 | - |
-| agent_pro_generate() | 구현 완료 | 모델 ID 최신 확인 필요 |
-| agent_flash_verify() | 구현 완료 | - |
-| clean_for_blog() 이미지 보호 | 구현 완료 | - |
-
-**agent_plan_structure(data: dict, score: float, topic: str) -> dict**
-- 역할: 전체 서사 설계도 및 데이터 필터링 수행
-- 모델: gemini-3-flash-preview
-- 출력: {structure_blueprint: {1~18: {logic, data_points}}}
-
-**agent_write_blog(blueprint: dict, data: dict) -> dict**
-- 역할: 설계도 기반 블로그 전문 집필 (2,500자+)
-- 모델: gemini-3-pro-preview
-- 출력: {blog_draft, blog_images: []}
-
-**agent_write_ppt(blueprint: dict, data: dict) -> dict**
-- 역할: 설계도 기반 18p 고밀도 대본 집필 (3,500자+)
-- 모델: gemini-3-pro-preview
-- 출력: {ppt_script: {1~18: {title, audio_script, visual_elements}}}
-
-**agent_flash_verify() 검증 항목**
-- 검증 수치: VIX, NASDAQ_chg, SP500_chg, TNX_10Y, USD_KRW, Fear_Greed, KOSPI
-- 검증 방식: 원본 수치가 블로그 초안 텍스트에 정확히 반영되었는지 LLM 판단
-- 반환: {is_clean: bool, issues_found: list, blog_draft: str}
-
----
-
-### 2.3 text_cleaner.py
-
-#### 현황 및 GAP
+#### 현황 및 상세
 | 기능 | 구현 상태 | 비고 |
-|------|----------|------|
-| bracket_purge() | 구현 완료 | TTS 전용 |
-| phonetic_convert() | 구현 완료 | TTS 전용 |
-| staccato_split() | 구현 완료 | TTS 전용 |
-| clean_for_tts() | 구현 완료 | - |
-| clean_for_blog() | 개선 완료 | 이미지 플레이스홀더 보호 추가 |
+|------|----------|-----|
+| O_FactSheet.md 생성 | 구현 완료 | 리서치 데이터 고정용 |
+| agent_plan_structure() | 구현 완료 | Blueprint MD 생성 |
+| agent_write_blog() | 구현 완료 | 2,500자+ 고밀도 집필 |
+| agent_write_ppt_chunk() | 구현 완료 | 팩트 기반 대본 생성 |
+| Robust JSON Parser | 구현 완료 | 문법 오류 자동 복구 |
 
-#### clean_for_blog() 처리 순서
-```
-1. re.sub(r'\[이미지\d[^\]]*\]', protect)  ← 플레이스홀더 토큰화 보호
-2. re.sub(r'\([^)]*\)', '')               ← 소괄호 제거
-3. deduplication()                        ← 중복 단어 제거
-4. 기호 변환 (↑→상승, ↓→하락)
-5. 플레이스홀더 복원
-```
+**[변경 사항]** 억지 수치인 `calculate_moneydaddy_score()`는 사용자 요청에 의해 전면 폐지되었으며, 이제 모든 기획은 수집된 팩트 시트에 기반하여 '팩트 충실도'를 최우선으로 함.
 
 ---
 
-### 2.4 pptx_generator.py
+### 2.3 pptx_generator.py (신규: Dynamic Canvas Engine)
 
-#### 현황 및 GAP
-| 기능 | 구현 상태 | GAP |
+#### 현황 및 상세
+| 기능 | 구현 상태 | 비고 |
 |------|----------|-----|
-| 18페이지 생성 | 구현 완료 | - |
-| 검정 배경 + 흰 제목 | 구현 완료 | - |
-| 14p 히트맵 삽입 | 구현 완료 | - |
-| **슬레이트 블루 & 골드 컬러 팔레트** | **미구현** | 제목 색상을 골드로, 배경 그라데이션 적용 필요 |
-| **핵심 수치 거대 배치 (Anchor)** | **미구현** | 1p에 오늘의 Anchor 수치를 초대형 폰트로 배치 필요 |
+| **Dynamic Grid Rendering** | **구현 완료** | 항목 개수에 따른 1단/2단 자동 분할 |
+| **Smart Scaling** | **구현 완료** | 텍스트 길이에 따른 폰트 크기 자동 조절 |
+| **Metric Highlighting** | **구현 완료** | 핵심 수치(%, 원, 점 등) 골드 강조 |
+| 18페이지 전체 빌드 | 구현 완료 | - |
 
-#### 구현 상세: 차트 및 시각화
-
-**create_chart_image(data_points, title, filename)**
-- 엔진: Matplotlib (Agg backend)
-- 스타일: Dark Theme (#1E2638), Gold Line (#D4AF37)
-- 위치: pptx_generator.py 내 11p, 15p 등 동적 삽입
-
-**generate_hybrid_thumbnail()**
-- 엔진: PIL (Pillow)
-- 로직: Image.open("assets/bg.png") → draw.text() (Shadow 효과 포함)
+#### 핵심 함수: render_flexible_slide()
+- 역할: 콘텐츠의 '부피'를 분석하여 최적의 레이아웃을 실시간으로 계산.
+- 로직: `num_elements > 4` 일 경우 자동으로 `Two-Column` 모드 발동.
+- 디자인: 슬레이트 블루 배경(#0F192D) + 골드 포인트(#D4AF37).
 
 ---
 
@@ -211,7 +162,6 @@ VERIFY_KEYS = [
 | SOXX | 에스오엑스엑스 |
 | VIX | 빅스 |
 | XLK | 엑스엘케이 |
-| FVG | 에프브이지 |
 | % | 퍼센트 |
 | +3.5 | 플러스 3.5 |
 | -1.2 | 마이너스 1.2 |
