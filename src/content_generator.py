@@ -157,10 +157,9 @@ def propose_topics(data: dict, keyword: str = None) -> list:
         proposals = call_gemini_with_retry(model, prompt)
         return proposals.get("proposals", [])
     except Exception as e:
-        print(f"  [Proposal Error] {selected_topic if 'selected_topic' in locals() else 'Topic Proposal'} failed: {e}")
+        print(f"  [Proposal Error] Topic Proposal failed: {e}")
         return []
 
-# ── 2. 기획 생성 로직 (High-Density Assets) ──────────────────────────────
 # ── 2. 기획 생성 로직 (High-Density Assets) ──────────────────────────────
 def _load_research_context(research: dict) -> str:
     """research_report에서 프롬프트 주입용 텍스트 블록 생성

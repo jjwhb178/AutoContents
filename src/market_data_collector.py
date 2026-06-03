@@ -20,6 +20,7 @@ def get_market_news():
     """
     print("  Fetching market news headlines and images...")
     news_items = []
+    r = None
     try:
         url = "https://finance.naver.com/news/mainnews.naver"
         headers = {"User-Agent": "Mozilla/5.0"}
