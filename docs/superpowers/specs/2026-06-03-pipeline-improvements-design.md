@@ -1,7 +1,7 @@
-# 📑 SW Design Specification: Automation Pipeline Improvements (Revised)
+# 📑 SW Design Specification: Automation Pipeline Improvements (Revised v2)
 
 - **작성일**: 2026-06-03
-- **상태**: APPROVED (피드백 반영 완료)
+- **상태**: APPROVED (최종 피드백 반영 완료)
 - **주요 대상**: Remotion 가변 동적 대본 반영, 소프트 게이트 구현, 환경 설정 유연성 및 버그 수정
 
 ---
@@ -30,6 +30,8 @@ graph TD
   - `video_structure`의 씬 수(5~10개)가 유동적이므로, 고정된 컴포넌트 구조 대신 **가변 씬 수에 관계없이 동적으로 TSX 컴포넌트 코드를 조립**하여 `Main.tsx`를 통째로 덮어쓰는 구조로 리팩토링합니다.
   - 씬 컴포넌트명은 `Scene1`, `Scene2`, `Scene3`... 와 같이 씬의 개수에 맞춰 자동 생성하도록 `update_remotion_sources()` 함수를 확장 구현합니다.
   - 각 씬의 자막(`caption_layout`) 및 텍스트 데이터가 해당 씬 컴포넌트에 올바르게 주입되도록 템플릿 코드 생성기를 설계합니다.
+  - **자막 포맷 처리**: `"라인1 / 라인2"` 형태로 들어오는 문자열은 `/` 문자를 기준으로 분리하여 TSX(JSX) 렌더링 시 `<br />` 태그 또는 개별 `<div>` 요소로 줄바꿈 처리되도록 합니다.
+  - **특수문자 이스케이프**: JSX 템플릿 내에 한국어 특수문자나 따옴표(`"`, `'`), 중괄호(`{`, `}`) 등이 포함될 수 있으므로, 치환 과정에서 JS/TSX 구문 에러를 방지하기 위해 특수문자 이스케이프 처리를 철저히 설계합니다.
 
 ### 2.2 `REMOTION_DIR` 환경 변수 관리 및 `.env` 명세
 - **기존 문제**: 로컬 드라이브의 절대 경로가 하드코딩되어 협업 환경 및 다른 빌드 서버에서 실행되지 않음.
@@ -40,7 +42,7 @@ graph TD
 ### 2.3 팩트체크 '소프트 게이트(Soft-Gate)' 전환
 - **기존 문제**: 수치 포맷(반올림, 쉼표 표기 등)의 사소한 불일치로 인해 팩트체크 검증에서 `FAILED` 판정이 날 경우 파이프라인 전체가 강제 중단되어 비디오 렌더링이나 발행이 아예 불가능함.
 - **해결 설계**:
-  - [main.py](file:///D:/01_formyself/AutoContents/main.py) 및 [src/generation_pipeline.py](file:///D:/01_formyself/AutoContents/src/generation_pipeline.py) 내의 `sys.exit(1)` 처리 구문을 제거하거나 무효화합니다.
+  - [main.py](file:///D:/01_formyself/AutoContents/main.py) (L119-L123) 및 [src/generation_pipeline.py](file:///D:/01_formyself/AutoContents/src/generation_pipeline.py) 내의 `sys.exit(1)` 처리 구문을 제거하거나 무효화합니다.
   - 팩트 검증에서 `FAILED`가 검출되어도 화면이나 로그창에 경고(⚠️)만 크게 출력한 뒤, 렌더링(Phase 5) 및 발행 단계로 넘어갈 수 있도록 소프트 게이트로 흐름 제어 규칙을 완화합니다.
 
 ### 2.4 네이버 블로그 본문 3,000자 절단 제한 완화 (`naver_blog_poster.py`)
@@ -51,7 +53,7 @@ graph TD
 ### 2.5 `back_data_trends` 자연어 포맷팅 개선
 - **기존 문제**: `back_data_trends`의 원본 JSON dict 구조가 여과 없이 AI 프롬프트에 그대로 노출되어 프롬프트 품질 및 AI 결과 안정성을 저해함.
 - **해결 설계**:
-  - `src/verification_loop.py` 내의 `generate_fact_sheet()`에서 활용하는 백데이터 포맷팅 방식을 모듈화하거나 재사용하여, `content_generator.py` 내 `_load_research_context()`에서 `back_data_trends`를 가독성 높은 자연어 텍스트로 깔끔하게 치환하여 프롬프트에 제공합니다.
+  - `src/research_agent.py` 내의 `generate_fact_sheet()`에서 활용하는 백데이터 포맷팅 방식을 모듈화하거나 유사하게 구현하여, `content_generator.py` 내 `_load_research_context()`에서 `back_data_trends`를 가독성 높은 자연어 텍스트로 치환해 프롬프트에 제공합니다.
 
 ### 2.6 `market_data_collector.py` NameError 버그 조치
 - **기존 문제**: 예외가 터질 시 `r` 객체가 선언되지 않은 상태에서 fallback 블록의 `r.text`를 파싱하려다 NameError 발생 가능성 있음.
