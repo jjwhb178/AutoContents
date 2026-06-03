@@ -10,9 +10,14 @@ Step 5: YouTube Auto-Uploader (YouTube Data API v3)
   최초 실행 시 브라우저 인증 창이 열리며 token.json이 생성됩니다.
 """
 import os
+import sys
 import json
 import pickle
 from datetime import datetime
+
+# sys.path 설정 추가하여 output_paths 임포트 보장
+sys.path.insert(0, os.path.dirname(__file__))
+from output_paths import get_path, get_dated_path
 
 CLIENT_SECRET_PATH = os.path.join("data", "client_secret.json")
 TOKEN_PATH         = os.path.join("data", "youtube_token.pickle")
@@ -109,8 +114,27 @@ def main():
     )
     tags = ["오늘의주식전망", "머니대디", "주식", "KOSPI", "주도주", "주도주수급", "거시경제"]
 
-    video_path     = os.path.join("outputs", "daily_video.mp4")
-    thumbnail_path = os.path.join("outputs", "thumbnail.png")
+    # 경로 동적 획득
+    video_path = get_dated_path("최종영상", "mp4")
+    if not os.path.exists(video_path):
+        video_path = get_path("daily_strategy_pro_final.mp4")
+        
+    thumbnail_path = get_path("thumbnail_A_rational.png")
+    if not os.path.exists(thumbnail_path):
+        thumbnail_path = get_path("thumbnail_B_emotional.png")
+
+    # 파일 검출 디버깅 코드 추가
+    print(f"[Debug] 비디오 경로: {video_path}")
+    if os.path.exists(video_path):
+        print(f"[Debug] 비디오 파일 크기: {os.path.getsize(video_path)} bytes")
+    else:
+        print("[Debug] 비디오 파일이 존재하지 않습니다.")
+
+    print(f"[Debug] 썸네일 경로: {thumbnail_path}")
+    if os.path.exists(thumbnail_path):
+        print(f"[Debug] 썸네일 파일 크기: {os.path.getsize(thumbnail_path)} bytes")
+    else:
+        print("[Debug] 썸네일 파일이 존재하지 않습니다.")
 
     if not os.path.exists(video_path):
         print(f"[Error] 영상 파일이 없습니다: {video_path}")
