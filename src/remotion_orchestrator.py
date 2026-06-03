@@ -29,13 +29,34 @@ if not os.path.isdir(REMOTION_DIR):
 
 # ── 1. Gemini 기반 고품격 애널리스트 대본 자동 생성 ───────────────────────────
 def generate_analyst_script(report_data: dict) -> dict:
-    """리서치 레포트 데이터를 기반으로 Gemini 2.5 Flash를 사용하여 5개 씬의 전문 대본을 자동 생성합니다."""
+    """리서치 레포트 데이터를 기반으로 Gemini 2.5 Flash를 사용하여 동적 N개 씬의 전문 대본을 자동 생성합니다."""
     import google.generativeai as genai
+    
+    logic_path = "data/latest_content_logic.json"
+    video_structure = []
+    if os.path.exists(logic_path):
+        try:
+            with open(logic_path, "r", encoding="utf-8") as f:
+                logic_data = json.load(f)
+                video_structure = logic_data.get("video_structure", [])
+        except Exception as e:
+            print(f"[Orchestrator] 대본 생성용 latest_content_logic.json 로드 에러: {e}")
+
+    if not video_structure or not isinstance(video_structure, list):
+        video_structure = [
+            {"scene": 1, "title": "주제 소개 및 투자자 관심 환기 (인트로)", "core_logic": "리서치 레포트 기반 인트로 및 주제 환기"},
+            {"scene": 2, "title": "핵심 팩트 1 및 글로벌 트렌드 상세 배경", "core_logic": "보고서의 주요 팩트 분석 및 배경 설명"},
+            {"scene": 3, "title": "핵심 쟁점 2 및 수익성/위험 요인 심층 분석", "core_logic": "보고서의 핵심 쟁점 및 위험 요인 심층 설명"},
+            {"scene": 4, "title": "한국 시장 및 관련 밸류체인(반도체, HBM 등)에 미치는 명암과 리스크", "core_logic": "국내 시장의 영향 및 반도체 밸류체인 분석"},
+            {"scene": 5, "title": "투자자들을 위한 실질적인 대응 전략 및 최종 요약 (아웃트로)", "core_logic": "머니대디 관점에서의 핵심 투자 전략 요약"}
+        ]
+        
+    N = len(video_structure)
     
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         print("[Orchestrator] GEMINI_API_KEY가 존재하지 않습니다. 기본 폴백 대본을 사용합니다.")
-        return get_fallback_script()
+        return get_fallback_script(video_structure)
         
     genai.configure(api_key=api_key)
     
@@ -54,7 +75,18 @@ def generate_analyst_script(report_data: dict) -> dict:
         system_instruction=system_instruction
     )
     
-    prompt = f"""제공된 오늘의 리서치 보고서를 바탕으로, 미국 및 한국 주식 투자자들을 위한 5개 씬의 영상 브리핑 대본을 작성해 주세요.
+    # 씬 정보를 프롬프트에 담기 위해 문자열로 빌드
+    scenes_desc = ""
+    json_schema_dict = {}
+    for i, s in enumerate(video_structure, start=1):
+        title = s.get("title", f"씬 {i}")
+        core_logic = s.get("core_logic", "")
+        scenes_desc += f"- scene{i}: 제목: {title} / 핵심 논리: {core_logic}\n"
+        json_schema_dict[f"scene{i}"] = f"씬{i} 내레이션 텍스트"
+        
+    json_schema_str = json.dumps(json_schema_dict, ensure_ascii=False, indent=2)
+    
+    prompt = f"""제공된 오늘의 리서치 보고서를 바탕으로, 미국 및 한국 주식 투자자들을 위한 {N}개 씬의 영상 브리핑 대본을 작성해 주세요.
 
 [오늘의 주제]
 {report_data.get("topic", "오늘의 핵심 경제 이슈 분석")}
@@ -75,23 +107,13 @@ def generate_analyst_script(report_data: dict) -> dict:
 {report_data.get("hard_facts", [])}
 
 [작성 규칙]
-1. 5개 씬의 대본을 작성합니다:
-   - scene1: 주제 소개 및 투자자 관심 환기 (인트로)
-   - scene2: 핵심 팩트 1 및 글로벌 트렌드 상세 배경
-   - scene3: 핵심 쟁점 2 및 수익성/위험 요인 심층 분석
-   - scene4: 한국 시장 및 관련 밸류체인(반도체, HBM 등)에 미치는 명암과 리스크
-   - scene5: 투자자들을 위한 실질적인 대응 전략 및 최종 요약 (아웃트로)
+1. {N}개 씬의 대본을 작성합니다:
+{scenes_desc}
 2. 각 씬의 대본은 생략 없이 전문가가 조목조목 설명하듯 상세하게 작성해 주십시오. (각 씬당 한글 100~150자 내외로 상세하게)
 3. 출력은 반드시 아래 JSON 스키마를 따르는 JSON 포맷이어야 합니다.
 
 출력 JSON 스키마:
-{{
-  "scene1": "씬1 내레이션 텍스트",
-  "scene2": "씬2 내레이션 텍스트",
-  "scene3": "씬3 내레이션 텍스트",
-  "scene4": "씬4 내레이션 텍스트",
-  "scene5": "씬5 내레이션 텍스트"
-}}"""
+{json_schema_str}"""
 
     try:
         res = model.generate_content(prompt)
@@ -107,16 +129,29 @@ def generate_analyst_script(report_data: dict) -> dict:
         return result
     except Exception as e:
         print(f"[Orchestrator] 대본 생성 API 오류: {e}. 폴백 대본을 사용합니다.")
-        return get_fallback_script()
+        return get_fallback_script(video_structure)
 
-def get_fallback_script() -> dict:
-    return {
-        "scene1": "머니대디 시청자 여러분, 안녕하십니까? 미국과 한국 시장의 돈의 흐름을 빠르게 분석해 드리는 머니대디입니다.",
-        "scene2": "첫 번째, 시장 지황입니다. 미국 증시는 국채 금리와 환율 변동 속에 변동성이 높은 상태를 유지하고 있습니다.",
-        "scene3": "두 번째, 심화되는 수익화 의구심 속에서 다음 자산 상승을 이끌 주도주를 포착하는 것이 중요합니다.",
-        "scene4": "세 번째, 한국 증시입니다. 반도체 소부장과 자동차 등 대표적 강세 섹터로의 수급 이동이 돋보입니다.",
-        "scene5": "마지막으로 거시경제 리스크를 관리하며 현명한 자금 이동 경로를 추적하는 전략이 유효합니다."
-    }
+def get_fallback_script(video_structure: list = None) -> dict:
+    """가변 씬 수에 맞춰 폴백 대본 딕셔너리를 리턴합니다."""
+    if not video_structure:
+        video_structure = [
+            {"scene": 1, "title": "주제 소개 및 투자자 관심 환기 (인트로)", "core_logic": "리서치 레포트 기반 인트로 및 주제 환기"},
+            {"scene": 2, "title": "핵심 팩트 1 및 글로벌 트렌드 상세 배경", "core_logic": "보고서의 주요 팩트 분석 및 배경 설명"},
+            {"scene": 3, "title": "핵심 쟁점 2 및 수익성/위험 요인 심층 분석", "core_logic": "보고서의 핵심 쟁점 및 위험 요인 심층 설명"},
+            {"scene": 4, "title": "한국 시장 및 관련 밸류체인(반도체, HBM 등)에 미치는 명암과 리스크", "core_logic": "국내 시장의 영향 및 반도체 밸류체인 분석"},
+            {"scene": 5, "title": "투자자들을 위한 실질적인 대응 전략 및 최종 요약 (아웃트로)", "core_logic": "머니대디 관점에서의 핵심 투자 전략 요약"}
+        ]
+    fallback = {}
+    for i, s in enumerate(video_structure, start=1):
+        title = s.get("title", f"씬 {i}")
+        core_logic = s.get("core_logic", "")
+        if i == 1:
+            fallback[f"scene{i}"] = f"머니대디 브리핑을 시작합니다. 오늘 설명드릴 첫 번째 주제는 {title}입니다. {core_logic}"
+        elif i == len(video_structure):
+            fallback[f"scene{i}"] = f"마지막으로 요약해 드리겠습니다. {title}과 관련하여, {core_logic} 관점으로 시장에 대응하시기 바랍니다."
+        else:
+            fallback[f"scene{i}"] = f"다음으로 {title}에 대해 알아보겠습니다. {core_logic}"
+    return fallback
 
 async def generate_tts_with_retry(name: str, text: str, final_path: str, voice: str, rate: str, retries: int = 3) -> bool:
     import edge_tts
@@ -148,9 +183,47 @@ def get_audio_duration(ffmpeg_bin: str, file_path: str) -> float:
         print(f"  [Duration Error] {e}")
     return 5.0
 
+def escape_js(text: str) -> str:
+    """JS/TSX 구문 에러를 예방하기 위해 백슬래시와 큰따옴표 등을 이스케이프 처리합니다."""
+    if not text:
+        return ""
+    # 백슬래시와 큰따옴표 이스케이프
+    text = text.replace('\\', '\\\\')
+    text = text.replace('"', '\\"')
+    text = text.replace('\n', ' ')
+    return text
+
 def update_remotion_sources(durations: dict):
     # DURATION_IN_FRAMES 계산
-    total_frames = sum(durations.values())
+    # 0. latest_content_logic.json 로드하여 N 및 video_structure 파악
+    logic_path = "data/latest_content_logic.json"
+    video_structure = []
+    if os.path.exists(logic_path):
+        try:
+            with open(logic_path, "r", encoding="utf-8") as f:
+                logic_data = json.load(f)
+                video_structure = logic_data.get("video_structure", [])
+        except Exception as e:
+            print(f"[Orchestrator] update_remotion_sources에서 {logic_path} 로드 중 에러: {e}")
+
+    # video_structure가 비어있거나 올바른 리스트가 아니면 기본 5개 씬 정의
+    if not video_structure or not isinstance(video_structure, list):
+        video_structure = [
+            {"scene": 1, "title": "주제 소개 및 투자자 관심 환기 (인트로)", "core_logic": "리서치 레포트 기반 인트로 및 주제 환기"},
+            {"scene": 2, "title": "핵심 팩트 1 및 글로벌 트렌드 상세 배경", "core_logic": "보고서의 주요 팩트 분석 및 배경 설명"},
+            {"scene": 3, "title": "핵심 쟁점 2 및 수익성/위험 요인 심층 분석", "core_logic": "보고서의 핵심 쟁점 및 위험 요인 심층 설명"},
+            {"scene": 4, "title": "한국 시장 및 관련 밸류체인(반도체, HBM 등)에 미치는 명암과 리스크", "core_logic": "국내 시장의 영향 및 반도체 밸류체인 분석"},
+            {"scene": 5, "title": "투자자들을 위한 실질적인 대응 전략 및 최종 요약 (아웃트로)", "core_logic": "머니대디 관점에서의 핵심 투자 전략 요약"}
+        ]
+        
+    N = len(video_structure)
+    scene_frames = []
+    for i in range(1, N + 1):
+        key = f"scene{i}"
+        frames = durations.get(key, 150) # 폴백 150프레임 (5초)
+        scene_frames.append(frames)
+    
+    total_frames = sum(scene_frames)
     
     # 1. constants.ts 업데이트
     constants_path = os.path.join(REMOTION_DIR, "types", "constants.ts")
@@ -170,18 +243,129 @@ export const VIDEO_WIDTH = 1280;
 export const VIDEO_HEIGHT = 720;
 export const VIDEO_FPS = 30;
 """
+    # 디렉토리 존재 보장
+    os.makedirs(os.path.dirname(constants_path), exist_ok=True)
     with open(constants_path, "w", encoding="utf-8") as f:
         f.write(constants_content)
     print(f"[Orchestrator] constants.ts 업데이트 완료 (총 프레임: {total_frames})")
 
     # 2. Main.tsx 업데이트
     main_tsx_path = os.path.join(REMOTION_DIR, "src", "remotion", "MyComp", "Main.tsx")
+    os.makedirs(os.path.dirname(main_tsx_path), exist_ok=True)
     
-    sc1 = durations["scene1"]
-    sc2 = durations["scene2"]
-    sc3 = durations["scene3"]
-    sc4 = durations["scene4"]
-    sc5 = durations["scene5"]
+    # Scene 컴포넌트 소스코드 동적 생성
+    scene_components = []
+    for i, s in enumerate(video_structure, start=1):
+        title = s.get("title", f"씬 {i}")
+        title_escaped = escape_js(title)
+        
+        caption_layout = s.get("caption_layout", title)
+        caption_parts = [p.strip() for p in caption_layout.split('/')]
+        caption_jsx = " <br /> ".join([f'{{"{escape_js(p)}"}}' for p in caption_parts])
+        
+        visual_asset = s.get("visual_asset", "none")
+        has_visual = False
+        if visual_asset and visual_asset != "none":
+            if isinstance(visual_asset, dict):
+                if visual_asset.get("type", "none") != "none":
+                    has_visual = True
+            else:
+                has_visual = True
+        
+        image_file = f"슬라이드_시각자료_{i}.png"
+        image_path = os.path.join(REMOTION_DIR, "public", image_file)
+        
+        use_image = has_visual and os.path.exists(image_path)
+        
+        # 씬 컴포넌트 템플릿
+        if use_image:
+            comp_src = f"""// Scene {i}: {title_escaped} (이미지 포함)
+const Scene{i} = () => {{
+  const frame = useCurrentFrame();
+  const {{ fps, durationInFrames }} = useVideoConfig();
+  const opacity = interpolate(frame, [0, 20, durationInFrames - 20, durationInFrames], [0, 1, 1, 0], {{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }});
+  const scale = spring({{ frame, fps, config: {{ damping: 15 }} }});
+  
+  return (
+    <AbsoluteFill className="flex flex-col justify-center items-center text-white bg-slate-950 p-12" style={{{{ opacity, fontFamily }}}}>
+      <Audio src={{staticFile('scene{i}.mp3')}} volume={{1.0}} />
+      <div className="absolute inset-0 bg-radial-[circle_at_center,_var(--color-indigo-950)_0%,_var(--color-slate-950)_80%]" />
+      
+      <div className="z-10 flex flex-row items-center justify-between w-full max-w-5xl gap-8">
+        <div className="flex flex-col w-[50%] text-left">
+          <span className="inline-block px-4 py-2 mb-6 text-sm font-semibold text-cyan-400 bg-cyan-950/50 border border-cyan-800 rounded-full w-fit">
+            씬 {i}: {{"{title_escaped}"}}
+          </span>
+          <h1 className="text-4xl font-bold leading-tight mb-6 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-400">
+            {caption_jsx}
+          </h1>
+        </div>
+        <div className="w-[50%] flex justify-center items-center">
+          <div className="relative border border-slate-800 rounded-2xl overflow-hidden bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+            <img 
+              src={{staticFile('슬라이드_시각자료_{i}.png')}} 
+              alt="시각 자료"
+              style={{{{
+                maxWidth: '100%',
+                maxHeight: '400px',
+                objectFit: 'contain',
+                borderRadius: '12px',
+                transform: `scale(${{scale}})`
+              }}}}
+            />
+          </div>
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+}};
+"""
+        else:
+            comp_src = f"""// Scene {i}: {title_escaped} (텍스트 전용)
+const Scene{i} = () => {{
+  const frame = useCurrentFrame();
+  const {{ fps, durationInFrames }} = useVideoConfig();
+  const opacity = interpolate(frame, [0, 20, durationInFrames - 20, durationInFrames], [0, 1, 1, 0], {{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }});
+  const scale = spring({{ frame, fps, config: {{ damping: 15 }} }});
+  
+  return (
+    <AbsoluteFill className="flex flex-col justify-center items-center text-white bg-slate-950 p-12" style={{{{ opacity, fontFamily }}}}>
+      <Audio src={{staticFile('scene{i}.mp3')}} volume={{1.0}} />
+      <div className="absolute inset-0 bg-radial-[circle_at_center,_var(--color-indigo-950)_0%,_var(--color-slate-950)_80%]" />
+      
+      <div className="z-10 text-center max-w-4xl">
+        <span className="inline-block px-4 py-2 mb-6 text-sm font-semibold text-cyan-400 bg-cyan-950/50 border border-cyan-800 rounded-full">
+          씬 {i}: {{"{title_escaped}"}}
+        </span>
+        <h1 className="text-5xl font-bold leading-tight mb-6 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-400" style={{{{ transform: `scale(${{scale}})` }}}}>
+          {caption_jsx}
+        </h1>
+      </div>
+    </AbsoluteFill>
+  );
+}};
+"""
+        scene_components.append(comp_src)
+        
+    scene_components_code = "\n".join(scene_components)
+    
+    # Sequence JSX 블록 생성
+    sequence_blocks = []
+    cumulative = 0
+    for i in range(1, N + 1):
+        frames = scene_frames[i - 1]
+        if i == 1:
+            block = f"""      <Sequence durationInFrames={{{frames}}} layout="none">
+        <Scene{i} />
+      </Sequence>"""
+        else:
+            block = f"""      <Sequence from={{{cumulative}}} durationInFrames={{{frames}}} layout="none">
+        <Scene{i} />
+      </Sequence>"""
+        cumulative += frames
+        sequence_blocks.append(block)
+    
+    sequences_jsx = "\n".join(sequence_blocks)
     
     main_content = f"""import {{ fontFamily, loadFont }} from "@remotion/google-fonts/NotoSansKR";
 import {{
@@ -202,195 +386,20 @@ loadFont("normal", {{
   weights: ["400", "700"],
 }});
 
-// Scene 1: Intro
-const SceneIntro = () => {{
-  const frame = useCurrentFrame();
-  const {{ fps, durationInFrames }} = useVideoConfig();
-  const opacity = interpolate(frame, [0, 20, durationInFrames - 20, durationInFrames], [0, 1, 1, 0], {{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }});
-  const scale = spring({{ frame, fps, config: {{ damping: 15 }} }});
-  return (
-    <AbsoluteFill className="flex flex-col justify-center items-center text-white bg-slate-950 p-12" style={{{{ opacity, fontFamily }}}}>
-      <Audio src={{staticFile('scene1.mp3')}} volume={{1.0}} />
-      <div className="absolute inset-0 bg-radial-[circle_at_center,_var(--color-indigo-950)_0%,_var(--color-slate-950)_80%]" />
-      <div className="z-10 text-center max-w-4xl">
-        <span className="inline-block px-4 py-2 mb-6 text-sm font-semibold text-cyan-400 bg-cyan-950/50 border border-cyan-800 rounded-full">글로벌 IT 트렌드 분석</span>
-        <h1 className="text-5xl font-bold leading-tight mb-6 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-400" style={{{{ transform: `scale(${{scale}})` }}}}>AI 투자 사이클,<br />진짜 거품일까?</h1>
-        <p className="text-xl text-slate-400 font-medium leading-relaxed">미국·한국 AI 관련 주식 투자자가 반드시 알아야 할 2026 핵심 쟁점 브리핑</p>
-      </div>
-    </AbsoluteFill>
-  );
-}};
-
-// Scene 2: CapEx Surge
-const SceneCapEx = () => {{
-  const frame = useCurrentFrame();
-  const {{ fps, durationInFrames }} = useVideoConfig();
-  const opacity = interpolate(frame, [0, 20, durationInFrames - 20, durationInFrames], [0, 1, 1, 0], {{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }});
-  const barProgress = spring({{ frame, fps, config: {{ damping: 12 }}, delay: 20 }});
-  return (
-    <AbsoluteFill className="flex flex-row text-white bg-slate-950 p-16 justify-between items-center" style={{{{ opacity, fontFamily }}}}>
-      <Audio src={{staticFile('scene2.mp3')}} volume={{1.0}} />
-      <div className="absolute inset-0 bg-radial-[circle_at_center,_var(--color-indigo-950)_0%,_var(--color-slate-950)_80%]" />
-      <div className="z-10 w-[55%] pr-8">
-        <span className="text-cyan-400 font-bold text-lg mb-2 block">01. 천문학적 설비 투자 (CapEx)</span>
-        <h2 className="text-4xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300">빅테크의 멈추지 않는 투자 질주</h2>
-        <ul className="space-y-4 text-lg text-slate-300 leading-relaxed">
-          <li className="flex items-start"><span className="text-cyan-400 mr-2">✔</span><span>5대 하이퍼스케일러의 2026년 합산 CapEx가 <b>$6,800억 달러</b>로 사상 최대치 돌파</span></li>
-          <li className="flex items-start"><span className="text-cyan-400 mr-2">✔</span><span>단순 AI 칩셋 구매를 넘어 <b>데이터센터 건설, 초고속 네트워킹, 전력망 확보</b>로 투자 중심 이동</span></li>
-        </ul>
-      </div>
-      <div className="z-10 w-[40%] h-[350px] bg-slate-900/60 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
-        <div className="text-sm font-semibold text-slate-400">빅테크 연도별 CapEx 합산 추이 (십억 달러)</div>
-        <div className="flex flex-row justify-around items-end h-[240px] pt-4">
-          <div className="flex flex-col items-center w-1/3">
-            <div className="w-12 bg-slate-700 rounded-t-lg transition-all" style={{{{ height: `${{120 * barProgress}}px` }}}} />
-            <span className="text-xs text-slate-400 mt-2">2024 (실적)</span>
-            <span className="font-bold text-slate-300 text-sm">$320B</span>
-          </div>
-          <div className="flex flex-col items-center w-1/3">
-            <div className="w-12 bg-cyan-600 rounded-t-lg transition-all" style={{{{ height: `${{180 * barProgress}}px` }}}} />
-            <span className="text-xs text-slate-400 mt-2">2025 (추정)</span>
-            <span className="font-bold text-cyan-300 text-sm">$480B</span>
-          </div>
-          <div className="flex flex-col items-center w-1/3">
-            <div className="w-12 bg-gradient-to-t from-cyan-400 to-indigo-500 rounded-t-lg transition-all shadow-[0_0_15px_rgba(34,211,238,0.3)]" style={{{{ height: `${{240 * barProgress}}px` }}}} />
-            <span className="text-xs text-cyan-400 mt-2 font-semibold">2026 (전망)</span>
-            <span className="font-bold text-cyan-400 text-sm animate-pulse">$680B</span>
-          </div>
-        </div>
-      </div>
-    </AbsoluteFill>
-  );
-}};
-
-// Scene 3: Revenue Gap
-const SceneRevenueGap = () => {{
-  const frame = useCurrentFrame();
-  const {{ fps, durationInFrames }} = useVideoConfig();
-  const opacity = interpolate(frame, [0, 20, durationInFrames - 20, durationInFrames], [0, 1, 1, 0], {{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }});
-  const anim = spring({{ frame, fps, config: {{ damping: 15 }} }});
-  return (
-    <AbsoluteFill className="flex flex-row-reverse text-white bg-slate-950 p-16 justify-between items-center" style={{{{ opacity, fontFamily }}}}>
-      <Audio src={{staticFile('scene3.mp3')}} volume={{1.0}} />
-      <div className="absolute inset-0 bg-radial-[circle_at_center,_var(--color-indigo-950)_0%,_var(--color-slate-950)_80%]" />
-      <div className="z-10 w-[55%] pl-8">
-        <span className="text-rose-400 font-bold text-lg mb-2 block">02. 실질 수익화 의구심 (Revenue Gap)</span>
-        <h2 className="text-4xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300">투자금 대비 부족한 AI 매출액</h2>
-        <ul className="space-y-4 text-lg text-slate-300 leading-relaxed">
-          <li className="flex items-start"><span className="text-rose-400 mr-2">✘</span><span>인프라 비용 회수와 최소 마진 충족을 위해 연간 약 <b>$6,000억 달러</b>의 글로벌 AI 매출 필수</span></li>
-          <li className="flex items-start"><span className="text-rose-400 mr-2">✘</span><span>현재 실질 기업용 AI 유료 매출은 <b>$1,000억 달러 미만</b>으로 <b>$5,000억 달러 규모의 거대 갭</b> 상존</span></li>
-        </ul>
-      </div>
-      <div className="z-10 w-[40%] h-[350px] bg-slate-900/60 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center items-center">
-        <div className="text-center mb-6"><div className="text-sm font-semibold text-slate-400">투자 회수 요구액 vs 실제 연간 매출</div></div>
-        <div className="relative w-full flex flex-col items-center justify-center space-y-4">
-          <div className="w-64 bg-slate-800 text-center py-3 rounded-lg border border-slate-700 text-sm font-semibold relative overflow-hidden" style={{{{ transform: `scale(${{interpolate(anim, [0, 1], [0.8, 1])}})` }}}}>필요 매출: <span className="text-cyan-400 font-bold">$600B</span></div>
-          <div className="h-10 w-0.5 bg-dashed bg-rose-500/60" />
-          <div className="w-48 bg-rose-950/60 text-center py-3 rounded-lg border border-rose-800 text-sm font-semibold" style={{{{ transform: `scale(${{interpolate(anim, [0, 1], [0.8, 1])}})` }}}}>실제 매출: <span className="text-rose-400 font-bold">$100B 미만</span></div>
-          <div className="absolute -right-4 top-1/2 -translate-y-1/2 bg-rose-500/20 text-rose-400 border border-rose-500/40 text-xs px-3 py-1.5 rounded-full font-bold animate-pulse" style={{{{ opacity: anim }}}}>GAP: $500B+ (수익 구멍)</div>
-        </div>
-      </div>
-    </AbsoluteFill>
-  );
-}};
-
-// Scene 4: Korean/US Stock Impact
-const SceneStockImpact = () => {{
-  const frame = useCurrentFrame();
-  const {{ fps, durationInFrames }} = useVideoConfig();
-  const opacity = interpolate(frame, [0, 20, durationInFrames - 20, durationInFrames], [0, 1, 1, 0], {{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }});
-  const arrowMove = interpolate(frame, [0, 60], [-10, 0], {{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }});
-  return (
-    <AbsoluteFill className="flex flex-row text-white bg-slate-950 p-16 justify-between items-center" style={{{{ opacity, fontFamily }}}}>
-      <Audio src={{staticFile('scene4.mp3')}} volume={{1.0}} />
-      <div className="absolute inset-0 bg-radial-[circle_at_center,_var(--color-indigo-950)_0%,_var(--color-slate-950)_80%]" />
-      <div className="z-10 w-[55%] pr-8">
-        <span className="text-amber-400 font-bold text-lg mb-2 block">03. 미·한 반도체 밸류체인 영향</span>
-        <h2 className="text-4xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300">한국 HBM 반도체의 명과 암</h2>
-        <ul className="space-y-4 text-lg text-slate-300 leading-relaxed">
-          <li className="flex items-start"><span className="text-amber-400 mr-2">💡</span><span><b>단기 호황:</b> 빅테크의 투자 가속화는 SK하이닉스 및 삼성전자의 HBM 전례 없는 실적 호재</span></li>
-          <li className="flex items-start"><span className="text-amber-400 mr-2">⚠</span><span><b>구조적 리스크:</b> 빅테크의 수익성 부진에 따른 CapEx 투자 속도 조절 시 수주 실적 및 주가 급락 위험</span></li>
-        </ul>
-      </div>
-      <div className="z-10 w-[40%] h-[350px] bg-slate-900/60 border border-slate-800 rounded-2xl p-6 flex flex-col justify-around">
-        <div className="flex items-center space-x-4 bg-slate-800/40 p-4 rounded-xl border border-slate-800">
-          <div className="w-12 h-12 bg-cyan-500/20 rounded-full flex items-center justify-center text-cyan-400 font-bold text-lg">💡</div>
-          <div>
-            <div className="font-bold text-slate-200">빅테크 인프라 투자 지속</div>
-            <div className="text-xs text-slate-400 mt-0.5">HBM 수요 긍정적 (SK하이닉스, 삼성전자)</div>
-          </div>
-        </div>
-        <div className="flex justify-center" style={{{{ transform: `translateY(${{arrowMove}}px)` }}}}>
-          <span className="text-3xl text-rose-500 font-bold">⬇</span>
-        </div>
-        <div className="flex items-center space-x-4 bg-rose-950/20 p-4 rounded-xl border border-rose-950">
-          <div className="w-12 h-12 bg-rose-500/20 rounded-full flex items-center justify-center text-rose-400 font-bold text-lg">⚠</div>
-          <div>
-            <div className="font-bold text-slate-200">수익 모델 지연 시 투자 조절</div>
-            <div className="text-xs text-slate-400 mt-0.5">반도체 수요 급감 및 주가 변동성 확대</div>
-          </div>
-        </div>
-      </div>
-    </AbsoluteFill>
-  );
-}};
-
-// Scene 5: Outro/Summary
-const SceneOutro = () => {{
-  const frame = useCurrentFrame();
-  const {{ fps, durationInFrames }} = useVideoConfig();
-  const opacity = interpolate(frame, [0, 20, durationInFrames - 20, durationInFrames], [0, 1, 1, 0], {{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }});
-  const scale = spring({{ frame, fps, config: {{ damping: 15 }} }});
-  return (
-    <AbsoluteFill className="flex flex-col justify-center items-center text-white bg-slate-950 p-12" style={{{{ opacity, fontFamily }}}}>
-      <Audio src={{staticFile('scene5.mp3')}} volume={{1.0}} />
-      <div className="absolute inset-0 bg-radial-[circle_at_center,_var(--color-indigo-950)_0%,_var(--color-slate-950)_80%]" />
-      <div className="z-10 text-center max-w-4xl">
-        <h2 className="text-4xl font-bold mb-8 text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400" style={{{{ transform: `scale(${{scale}})` }}}}>💡 AI 투자자를 위한 3대 생존 가이드</h2>
-        <div className="grid grid-cols-3 gap-6 text-left">
-          <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl">
-            <div className="text-cyan-400 font-bold text-lg mb-2">1. 맹목적 낙관·공포 금물</div>
-            <p className="text-sm text-slate-300 leading-relaxed">설비투자와 실제 비즈니스 모델 수익성을 철저히 이분법적으로 분리하여 추적하십시오.</p>
-          </div>
-          <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl">
-            <div className="text-cyan-400 font-bold text-lg mb-2">2. 레버리지 축소</div>
-            <p className="text-sm text-slate-300 leading-relaxed">단기 변동성이 극대화될 수 있으므로, 고배율 레버리지 주식 투자는 지양하는 것이 안전합니다.</p>
-          </div>
-          <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl">
-            <div className="text-cyan-400 font-bold text-lg mb-2">3. 핵심 밸류체인 압축</div>
-            <p className="text-sm text-slate-300 leading-relaxed">성장세가 실제 실적 숫자로 증명되는 HBM 핵심 리더 및 실무 상용화 AI 강소기업 위주로 압축하십시오.</p>
-          </div>
-        </div>
-      </div>
-    </AbsoluteFill>
-  );
-}};
+{scene_components_code}
 
 export const Main = ({{ title }}: z.infer<typeof CompositionProps>) => {{
   return (
     <AbsoluteFill className="bg-slate-950">
-      <Sequence durationInFrames={{{sc1}}} layout="none">
-        <SceneIntro />
-      </Sequence>
-      <Sequence from={{{sc1}}} durationInFrames={{{sc2}}} layout="none">
-        <SceneCapEx />
-      </Sequence>
-      <Sequence from={{{sc1 + sc2}}} durationInFrames={{{sc3}}} layout="none">
-        <SceneRevenueGap />
-      </Sequence>
-      <Sequence from={{{sc1 + sc2 + sc3}}} durationInFrames={{{sc4}}} layout="none">
-        <SceneStockImpact />
-      </Sequence>
-      <Sequence from={{{sc1 + sc2 + sc3 + sc4}}} durationInFrames={{{sc5}}} layout="none">
-        <SceneOutro />
-      </Sequence>
+{sequences_jsx}
     </AbsoluteFill>
   );
 }};
 """
+
     with open(main_tsx_path, "w", encoding="utf-8") as f:
         f.write(main_content)
-    print(f"[Orchestrator] Main.tsx 업데이트 완료 (각 프레임 매핑 완료)")
+    print(f"[Orchestrator] Main.tsx 업데이트 완료 (총 {N}개 씬 동적 매핑 완료)")
 
 # ── 4. 메인 파이프라인 연동 ───────────────────────────────────────────────────
 def run_remotion_pipeline() -> bool:
