@@ -98,8 +98,15 @@ def upload_video(youtube, video_path: str, thumbnail_path: str,
 
 def main():
     logic_path = os.path.join("data", "latest_content_logic.json")
-    with open(logic_path, "r", encoding="utf-8") as f:
-        logic = json.load(f)
+    if not os.path.exists(logic_path):
+        print(f"[Error] {logic_path} 파일이 존재하지 않습니다. 먼저 기획안 작성을 완료하세요.")
+        return
+    try:
+        with open(logic_path, "r", encoding="utf-8") as f:
+            logic = json.load(f)
+    except (json.JSONDecodeError, Exception) as e:
+        print(f"[Error] {logic_path} 파일이 유효한 JSON 형식이 아닙니다: {e}")
+        return
 
     score = logic.get("score", 50.0)
     mood  = "공격" if score >= 50 else "방어"

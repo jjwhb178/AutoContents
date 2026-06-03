@@ -6,6 +6,7 @@ Shared output path resolver.
 """
 import os
 import json
+import re
 from datetime import datetime
 
 
@@ -38,7 +39,6 @@ def get_topic_keyword() -> str:
             with open(logic_path, "r", encoding="utf-8") as f:
                 logic = json.load(f)
                 title = logic.get("title", "")
-                import re
                 cleaned = re.sub(r"[^\w가-힣]", " ", title).strip()
                 words = [w for w in cleaned.split() if w]
                 if words:
@@ -53,7 +53,6 @@ def get_dated_filename(suffix: str, ext: str) -> str:
     """날짜(YYYYMMDD)와 키워드가 결합된 파일명을 생성합니다. 예: 20260530_ai투자_블로그초안.md"""
     today_str = datetime.now().strftime("%Y%m%d")
     keyword = get_topic_keyword()
-    import re
     keyword = re.sub(r'[\\/*?:"<>|]', "", keyword)
     return f"{today_str}_{keyword}_{suffix}.{ext}"
 
