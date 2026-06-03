@@ -6,6 +6,7 @@ import threading
 import subprocess
 import webbrowser
 import tkinter as tk
+import re
 from datetime import datetime
 from tkinter import ttk, scrolledtext, messagebox
 from PIL import Image, ImageTk
@@ -261,7 +262,6 @@ class MoneyDaddyGUI:
             self.btn_gen.config(state=tk.NORMAL)
             
             # Save selected keyword for dated filenames
-            import re
             cleaned_topic = re.sub(r"\[.*?\]", "", self.confirmed_topic).strip()
             cleaned = re.sub(r"[^\w가-힣]", " ", cleaned_topic).strip()
             words = [w for w in cleaned.split() if w]
@@ -448,8 +448,6 @@ class MoneyDaddyGUI:
         
         py = sys.executable
         cmd = f'"{py}" -u src/remotion_orchestrator.py'
-        
-        import re
         
         def on_line(line):
             self.root.after(0, lambda: self.log(line.strip()))
