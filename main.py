@@ -59,9 +59,15 @@ def get_proposals():
         "\n".join([f"[bold]{p['id']}. {p['type']} - {p['title']}[/bold]\n  └ {p['reason']}" for p in proposals]),
         title="오늘의 기획 제안 (Proposals)"
     ))
-    choice = Prompt.ask("주제 번호를 선택하거나 직접 입력하세요", default="1")
-
-    selected_topic = proposals[int(choice) - 1]["title"] if choice in ["1", "2", "3"] else choice
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(proposals):
+            selected_topic = proposals[idx]["title"]
+        else:
+            selected_topic = choice
+    except (ValueError, IndexError):
+        selected_topic = choice
+        
     console.print(f"\n[bold green][OK] 확정된 주제:[/bold green] {selected_topic}\n")
     return data, selected_topic
 
@@ -114,11 +120,15 @@ def main():
     console.print("\n[bold cyan]=== [VERIFY] Fact-Checking Gate ===[/bold cyan]")
     with console.status("[bold yellow]생성된 콘텐츠의 팩트 정합성 검증 중...", spinner="dots"):
         import src.verification_loop as vl
-        report = vl.verify_content()
+        report = ""
+        try:
+            report = vl.verify_content()
+        except Exception as e:
+            report = f"FAILED: 검증 스크립트 실행 중 예외 발생: {e}"
         
     if "FAILED" in report:
         console.print(Panel(report, title="[yellow]Verification Warning[/yellow]", border_style="yellow"))
-        console.print("[bold yellow]⚠️ 팩트 불일치가 발견되었으나 파이프라인을 계속 진행합니다.[/bold yellow]")
+        console.print("[bold yellow]⚠️ 팩트 불일치 혹은 검증 에러가 발견되었으나 파이프라인을 계속 진행합니다.[/bold yellow]")
     else:
         console.print("[bold green][PASS][/bold green] 팩트 검증 통과")
 

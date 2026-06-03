@@ -82,9 +82,14 @@ def main():
     print("🔎 생성된 콘텐츠의 팩트 정합성 검증 중...")
     sys.stdout.flush()
     
-    report = vl.verify_content()
+    report = ""
+    try:
+        report = vl.verify_content()
+    except Exception as e:
+        report = f"FAILED: 검증 과정 중 예외 발생: {e}"
+        
     if "FAILED" in report:
-        print("⚠️ [경고] 팩트 불일치 항목이 발견되었습니다. 결과를 확인 후 수정을 권장합니다.")
+        print("⚠️ [경고] 팩트 불일치 혹은 검증 에러가 발견되었습니다. 결과를 확인 후 수정을 권장합니다.")
         print(report)
         # sys.exit(1) 제거하여 파이프라인 계속 진행
     else:

@@ -58,28 +58,37 @@ def load_blog_draft() -> dict:
             raise FileNotFoundError(f"블로그 초안 파일을 찾을 수 없습니다: {out_dir}")
     
     logic_path = os.path.join("data", "latest_content_logic.json")
+    
+    if not os.path.exists(draft_path):
+        print(f"[Blog] Error: 초안 파일이 존재하지 않습니다: {draft_path}")
+        return {"title": "", "body_text": "", "tags": ""}
 
     with open(draft_path, "r", encoding="utf-8") as f:
         raw = f.read()
     print(f"[Blog] 초안 파일 로드: {draft_path}")
 
-    with open(logic_path, "r", encoding="utf-8") as f:
-        logic = json.load(f)
-
-    # 제목: logic.json의 title 사용, 없으면 날짜 기반 기본값
-    blog_title = logic.get("title", "")
+    # logic.json 파일 유무 검증 추가
+    blog_title = ""
+    if os.path.exists(logic_path):
+        try:
+            with open(logic_path, "r", encoding="utf-8") as f:
+                logic = json.load(f)
+            blog_title = logic.get("title", "")
+        except Exception as e:
+            print(f"[Blog] Warning: logic.json 로드 실패 ({e})")
+            
     if not blog_title:
         date = datetime.now().strftime("%Y.%m.%d")
         blog_title = f"[머니대디] {date} 오늘의 핵심 경제 이슈 분석"
 
-    # 줄바꿈 → <br> 변환 (Naver 에디터 호환)
-    body_html = raw.replace("\n", "<br>")
+    # insertText 사용을 위해 <br> 대신 개행 문자가 유지된 원본 텍스트를 그대로 사용
+    body_text = raw
     tags = "오늘의주식전망,머니대디,주식,KOSPI,주도주분석,주도주수급,경제동향,한국증시,ETF,코스피"
 
-    return {"title": blog_title, "body_html": body_html, "tags": tags}
+    return {"title": blog_title, "body_text": body_text, "tags": tags}
 
 
-def post_to_naver_blog(title: str, body_html: str, tags: str):
+def post_to_naver_blog(title: str, body_text: str, tags: str):
     """Selenium으로 네이버 블로그에 포스트."""
     from selenium import webdriver
     from selenium.webdriver.common.by import By
@@ -161,7 +170,7 @@ def post_to_naver_blog(title: str, body_html: str, tags: str):
                 if(el){ el.focus(); }
                 document.execCommand('selectAll');
                 document.execCommand('insertText', false, arguments[0]);
-            """, body_html[:50000])
+            """, body_text)
         except Exception as e:
             print(f"[Blog] 본문 입력 실패: {e}")
         time.sleep(2)
@@ -198,12 +207,18 @@ def post_to_naver_blog(title: str, body_html: str, tags: str):
 
 
 def main():
+    # 1) 초안 데이터 로드
+    draft_data = load_blog_draft()
+    if not draft_data["body_text"]:
+        print("[Blog] Error: 포스팅할 초안 본문 내용이 없습니다. 업로드를 중단합니다.")
+        sys.exit(1)
+
+    # 2) 블로그 포스팅 실행
     try:
-        draft = load_blog_draft()
         post_to_naver_blog(
-            title     = draft["title"],
-            body_html = draft["body_html"],
-            tags      = draft["tags"]
+            title=draft_data["title"],
+            body_text=draft_data["body_text"],
+            tags=draft_data["tags"]
         )
     except EnvironmentError as e:
         print(f"\n[설정 필요]\n{e}")
