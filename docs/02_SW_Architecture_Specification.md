@@ -14,15 +14,12 @@
 [main.py: Orchestrator]
        │
        ├─ Phase 1 : market_data_collector.py   (데이터 수집)
-       ├─ Phase 2a: visual_generator.py        (히트맵·QR 생성)
-       ├─ Phase 2b: content_generator.py       (AI 콘텐츠 생성 — Dual-Agent)
-       ├─ Phase 3a: pptx_generator.py          (PPT 합성)
-       ├─ Phase 3b: verification_loop.py       (수치 검증)
-       ├─ Phase 4 : tts_generator.py           (TTS 1.4배속)
-       ├─ Phase 5 : thumbnail_generator.py     (A/B 썸네일)
-       ├─ Phase 6 : video_synthesizer.py       (영상 합성 MP4)
-       ├─ [Optional] Phase 7: naver_blog_poster.py
-       └─ [Optional] Phase 8: youtube_uploader.py
+       ├─ Phase 2 : content_generator.py       (AI 콘텐츠 생성 — Dual-Agent)
+       ├─ Phase 3 : verification_loop.py       (수치 검증)
+       ├─ Phase 4 : visual/thumbnail/imagen_generator.py (시각 자료 및 썸네일 생성)
+       ├─ Phase 5 : remotion_orchestrator.py   (TTS 생성 및 Remotion 비디오 생성)
+       ├─ [Optional] Phase 6: naver_blog_poster.py
+       └─ [Optional] Phase 7: youtube_uploader.py
 ```
 
 ---
@@ -36,8 +33,8 @@
 ├─────────────────────────────────────────────────────┤
 │  Application Layer  (src/)                          │
 │  content_generator ← Dual-Agent 핵심               │
-│  pptx_generator / tts_generator / video_synthesizer│
-│  thumbnail_generator / visual_generator             │
+│  remotion_orchestrator / thumbnail_generator        │
+│  visual_generator                                   │
 ├─────────────────────────────────────────────────────┤
 │  Domain Layer  (src/)                               │
 │  market_data_collector / verification_loop          │
@@ -56,8 +53,8 @@
 ### 3.1 Orchestrator (main.py)
 - **역할:** Phase별 subprocess 호출, 성공/실패 판단, 히스토리 로깅
 - **실패 정책:**
-  - Core Phase(1~6): 실패 시 즉시 파이프라인 중단 + history.json 에러 기록
-  - Optional Phase(7~8): 실패 시 SKIP + 파이프라인 계속
+  - Core Phase(1~5): 실패 시 즉시 파이프라인 중단 + history.json 에러 기록
+  - Optional Phase(6~7): 실패 시 SKIP + 파이프라인 계속
 - **출력:** 콘솔 진행 상황, data/history.json
 
 ### 3.2 Phase 1 — market_data_collector.py
@@ -70,79 +67,48 @@
 - **Sector Pivot 감지:** sector_volume_surge 키에 거래량 비율 1.5배 이상 섹터 기록
 - **출력:** data/raw_market_data.json
 
-### 3.3 Phase 2a — visual_generator.py
-- **역할:** 섹터 히트맵 이미지 생성, QR 코드 생성
-- **출력:** outputs/YYYY-MM-DD/market_heatmap.png, qr_blog.png
+### 3.3 Phase 2 — content_generator.py (신규 아키텍처: Fact-Grounding)
 
-### 3.4 Phase 2b — content_generator.py (핵심 AI 엔진)
-
-#### 3-Step 하이브리드 흐름
+#### Fact-Blueprint 파이프라인
 ```
 raw_market_data.json
         │
-   [Step 1: Structure Planning] ── Gemini 3 Flash
-   ├─ 데이터 필터링 (주제 연관성 분석)
-   ├─ 18p 슬라이드별 논리 설계 (Blueprint)
-   └─ 출력: {structure_plan, filtered_stats}
+    [O_FactSheet.md 생성] ── 리서치 기반 절대적 팩트 고정
         │
-   [Step 2: Blog Content Writing] ── Gemini 3 Pro
-   ├─ 설계도 기반 블로그 전문 집필 (2,500자+)
-   └─ 출력: {blog_draft, blog_images}
+    [Step 1: Blueprint Planning] ── Gemini 2.5 Flash
+    ├─ 팩트 시트 기반 18p 논리 설계 (Blueprint MD)
+    └─ 레이아웃 제약 없는 자유 구조 기획
         │
-   [Step 3: PPT Script Writing] ── Gemini 3 Pro
-   ├─ 설계도 기반 18p 대본 집필 (3,500자+)
-   └─ 출력: {ppt_script: {1~18}}
-        │
-   [Matplotlib Engine]
-   ├─ 설계도 내 데이터 수치 추출
-   └─ 출력: {market_chart_v11.png, sector_chart_v15.png}
-        │
-   [저장]
-   ├─ data/latest_content_logic.json
-   └─ outputs/YYYY-MM-DD/daily_content_draft.md
+    [Step 2: Blog & PPT Script] ── Gemini 2.5 Pro
+    ├─ 블루프린트 기반 고밀도 대본 집필
+    └─ [Dynamic Canvas Engine]으로 데이터 전달
 ```
 
-#### 머니대디 스코어 산출 공식
-```
-Score = (100 - Fear_Greed) × 0.40
-      + max(0, 40 - VIX) × 2.5 × 0.20
-      + k_flow_normalized × 0.30
-      + tech_align × 0.10
-
-k_flow     = avg(top_kr_sector_returns) × 2  [범위 -10~+10]
-tech_align = (SOXX_chg + 5) / 10             [범위 0.0~1.0]
-```
-
-### 3.5 Phase 3a — pptx_generator.py
-- **역할:** latest_content_logic.json의 ppt_script 기반 18페이지 PPTX 생성
-- **디자인:** 검정 배경(0F0F0F), 흰색 제목, 회색 본문(C8C8C8), 24pt
-- **특이사항:** 14p에 market_heatmap.png 자동 삽입
-- **출력:** outputs/YYYY-MM-DD/daily_strategy_v2_5.pptx
-
-### 3.6 Phase 3b — verification_loop.py
+### 3.4 Phase 3 — verification_loop.py
 - **역할:** VIX, US10Y 수치가 블로그 초안에 정확히 언급되었는지 텍스트 검증
 - **출력:** outputs/YYYY-MM-DD/verification_report.md
 
-### 3.7 Phase 4 — tts_generator.py
-- **역할:** PPT 대본 텍스트 → gTTS → FFmpeg 1.4배속 처리
-- **처리 순서:** clean_for_tts() → gTTS(ko) → atempo=1.4 → 슬라이드별 MP3 + full_narration.mp3
-- **출력:** outputs/YYYY-MM-DD/audio/
+### 3.5 Phase 4 — visual_generator.py, thumbnail_generator.py & imagen_generator.py
+- **역할:** 시각 자료(히트맵/QR/차트), 하이브리드 방식의 썸네일 2종 및 AI 배경 이미지 생성
+- **로직:**
+  - `visual_generator.py`: 섹터 히트맵 이미지 및 블로그용 QR 코드 생성
+  - `thumbnail_generator.py`: assets/ 내 AI 생성 배경을 로드하여 PIL로 제목 및 강조 텍스트 합성 (썸네일 A/B 생성)
+  - `imagen_generator.py`: 구글 Imagen 3 API를 활용하여 인공지능 썸네일 및 블로그 본문용 이미지 생성
+- **출력:** outputs/YYYY-MM-DD/market_heatmap.png, thumbnail_A_rational.png, thumbnail_B_emotional.png
 
-### 3.8 Phase 5 — thumbnail_generator.py
-- **역할:** 하이브리드 방식의 썸네일 2종 생성
-- **로직:** assets/ 내 AI 생성 배경 로드 → PIL로 제목 및 강조 텍스트 합성
-- **출력:** thumbnail_A_rational.png, thumbnail_B_emotional.png
-
-### 3.9 Phase 6 — video_synthesizer.py
-- **역할:** PPTX 슬라이드 → PNG 변환 → 슬라이드별 오디오 길이에 맞춰 Dynamic Sync → FFmpeg MP4 합성
-- **Sync 정밀도:** 0.1초 단위
+### 3.6 Phase 5 — remotion_orchestrator.py
+- **역할:** TTS 생성, 오디오 길이 기반 씽크 연동 및 동적 렌더링 일괄 처리
+- **핵심 로직:**
+  - **TTS 생성:** 대본 텍스트를 기반으로 나레이션 음성 파일 자동 생성 (Neural TTS)
+  - **오디오 길이 기반 씽크 연동:** 각 슬라이드/씬의 오디오 길이를 측정하여 Remotion 프로젝트의 비디오 타임라인 프레임 길이를 동적으로 계산 및 매핑
+  - **동적 렌더링:** React 기반 Remotion 프레임워크를 구동하여 비디오 에셋과 자막, 나레이션을 합성한 후 최종 MP4 동영상 파일로 다이렉트 렌더링
 - **출력:** outputs/YYYY-MM-DD/daily_video.mp4
 
-### 3.10 Phase 7 — naver_blog_poster.py (Optional)
+### 3.7 Phase 6 — naver_blog_poster.py (Optional)
 - **역할:** session_data.json 기반 자동 로그인 → 블로그 포스팅
 - **자격증명:** .env 또는 data/session_data.json
 
-### 3.11 Phase 8 — youtube_uploader.py (Optional)
+### 3.8 Phase 7 — youtube_uploader.py (Optional)
 - **역할:** YouTube Data API v3로 MP4 업로드
 - **자격증명:** .env의 YouTube OAuth 토큰
 
@@ -169,17 +135,11 @@ qr_blog.png       │
     │             │
     └────┬────────┘
          ▼
-    pptx_generator
-    daily_strategy_v2_5.pptx
+    visual/thumbnail/imagen_generator
+    heatmap.png / thumbnail_A/B.png
          │
-    tts_generator
-    audio/*.mp3
-         │
-    video_synthesizer
+    remotion_orchestrator
     daily_video.mp4
-         │
-    thumbnail_generator
-    thumbnail_A/B.png
          │
     [Optional]
     naver_blog_poster → 네이버 블로그
@@ -206,8 +166,7 @@ qr_blog.png       │
 | alternative.me API | Fear & Greed 지수 | 무료 |
 | gTTS | 한국어 TTS 음성 생성 | 무료 |
 | FFmpeg / imageio-ffmpeg | 음성 배속 처리, 영상 합성 | 무료 |
-| python-pptx | PPTX 파일 생성 | 무료 |
-| opencv-python | 이미지 처리, 슬라이드 PNG 변환 | 무료 |
+| Node.js & Remotion | React 기반 비디오 컴포지션 및 렌더링 프레임워크 | 무료 |
 | python-dotenv | .env 환경 변수 로드 | 무료 |
 
 ---
@@ -227,11 +186,10 @@ AutoContents/
 │   ├── market_data_collector.py
 │   ├── visual_generator.py
 │   ├── content_generator.py
-│   ├── pptx_generator.py
 │   ├── verification_loop.py
-│   ├── tts_generator.py
 │   ├── thumbnail_generator.py
-│   ├── video_synthesizer.py
+│   ├── imagen_generator.py
+│   ├── remotion_orchestrator.py
 │   ├── naver_blog_poster.py
 │   ├── youtube_uploader.py
 │   ├── output_paths.py
@@ -239,15 +197,11 @@ AutoContents/
 └── outputs/
     └── YYYY-MM-DD/
         ├── daily_content_draft.md
-        ├── daily_strategy_v2_5.pptx
         ├── daily_video.mp4
         ├── thumbnail_A_rational.png
         ├── thumbnail_B_emotional.png
         ├── verification_report.md
-        ├── market_heatmap.png
-        └── audio/
-            ├── slide_01.mp3 ~ slide_18.mp3
-            └── full_narration.mp3
+        └── market_heatmap.png
 ```
 
 ### 7.2 환경 변수 (.env)
