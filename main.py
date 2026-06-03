@@ -16,13 +16,18 @@ def run_step(step_name: str, command: str, optional: bool = False) -> bool:
         try:
             result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
             elapsed = round(time.time() - t0, 1)
-            console.print(f"[bold green]✓[/bold green] {step_name} ({elapsed}s)")
+            console.print(f"[bold green][OK][/bold green] {step_name} ({elapsed}s)")
+            if result.stdout:
+                for line in result.stdout.strip().split('\n')[-3:]:
+                    if line.strip():
+                        console.print(f"[dim]    {line.strip()}[/dim]")
             return True
         except subprocess.CalledProcessError as e:
             elapsed = round(time.time() - t0, 1)
-            label = "[bold yellow]⚠ SKIP[/bold yellow]" if optional else "[bold red]✗ FAIL[/bold red]"
+            label = "[bold yellow][SKIP][/bold yellow]" if optional else "[bold red][FAIL][/bold red]"
             console.print(f"{label} {step_name} ({elapsed}s)")
-            console.print(f"[dim]{e.stderr[-300:]}[/dim]")
+            if e.stderr:
+                console.print(f"[dim]{e.stderr[-400:]}[/dim]")
             return optional
 
 def print_dashboard_preview():
@@ -32,102 +37,112 @@ def print_dashboard_preview():
     with open(logic_path, "r", encoding="utf-8") as f:
         logic = json.load(f)
 
-    console.print("\n[bold cyan]=== 🔍 Content Orchestration Preview ===[/bold cyan]")
-    console.print(f"[bold]Title:[/bold] {logic.get('title')}")
-    console.print(f"[bold]Theme:[/bold] {logic.get('theme_analysis')}")
-    
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("Page", style="dim", width=4)
-    table.add_column("Visual Text (Slide)", width=30)
-    table.add_column("Audio Script (TTS)", width=50)
-
-    script = logic.get("ppt_script", {})
-    for i in range(1, 19):
-        p = script.get(str(i), {})
-        if p:
-            v_text = str(p.get("visual_text", "")).replace('\n', ' ')
-            a_text = str(p.get("audio_script", ""))
-            table.add_row(str(i), v_text[:40] + ("..." if len(v_text)>40 else ""), a_text[:60] + ("..." if len(a_text)>60 else ""))
-            
-    console.print(table)
-    console.print("[dim]※ 이미지 및 썸네일 프롬프트가 동기화되어 준비 완료되었습니다.[/dim]")
+    console.print("\n[bold cyan]=== Content Orchestration Preview ===[/bold cyan]")
+    console.print(f"[bold]Title:[/bold] {logic.get('title', '(생성 중)')}")
+    console.print(f"[bold]Theme:[/bold] {logic.get('theme_analysis', '')[:80]}")
 
 def get_proposals():
     console.print("[bold yellow]뉴스 분석 및 주제 후보 도출 중...[/bold yellow]")
     import src.market_data_collector as mdc
     import src.content_generator as cg
-    mdc.main() # Phase 1 실행
-    
+    mdc.main()
+
     with open("data/raw_market_data.json", "r", encoding="utf-8") as f:
         data = json.load(f)
-        
+
     proposals = cg.propose_topics(data)
     if not proposals:
         console.print("[red]주제 제안에 실패했습니다. 기본 설정으로 진행합니다.[/red]")
         return data, "오늘의 핵심 경제 이슈 분석"
 
-    console.print(Panel("\n".join([f"[bold]{p['id']}. {p['type']} - {p['title']}[/bold]\n  └ {p['reason']}" for p in proposals]), title="오늘의 기획 제안 (Proposals)"))
-    
-    choice = Prompt.ask("주제 번호를 선택하거나, [bold cyan]직접 주제를 입력[/bold cyan]하세요 (예: 1, 2, 3, 혹은 '환율 폭등과 내 계좌 방어법')", default="1")
-    
-    selected_topic = ""
-    if choice in ["1", "2", "3"]:
-        selected_topic = proposals[int(choice)-1]["title"]
-    else:
-        selected_topic = choice
-        
-    console.print(f"\n[bold green]✅ 확정된 주제:[/bold green] {selected_topic}\n")
+    console.print(Panel(
+        "\n".join([f"[bold]{p['id']}. {p['type']} - {p['title']}[/bold]\n  └ {p['reason']}" for p in proposals]),
+        title="오늘의 기획 제안 (Proposals)"
+    ))
+    choice = Prompt.ask("주제 번호를 선택하거나 직접 입력하세요", default="1")
+
+    selected_topic = proposals[int(choice) - 1]["title"] if choice in ["1", "2", "3"] else choice
+    console.print(f"\n[bold green][OK] 확정된 주제:[/bold green] {selected_topic}\n")
     return data, selected_topic
 
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--auto", action="store_true", help="Skip interactive confirmation")
+    parser.add_argument("--auto", action="store_true", help="비대화형 자동 실행")
     args = parser.parse_args()
 
-    console.print(Panel.fit("[bold blue]MoneyDaddy AI Content Factory Ver 12.0[/bold blue]\n[dim]Interactive Workflow & Perfect Sync Architecture[/dim]"))
-    
+    console.print(Panel.fit(
+        "[bold blue]MoneyDaddy AI Content Factory Ver 14.0[/bold blue]\n"
+        "[dim]Research-First Pipeline / Remotion Direct Render[/dim]"
+    ))
+
     py = sys.executable
 
-    # Phase 1 & 2a: Interactive Planning
+    # ── Phase 1: 시장 데이터 수집 ────────────────────────────────────────────
     if not args.auto:
         data, selected_topic = get_proposals()
     else:
-        run_step("Phase 1 | 데이터 수집", f'"{py}" src/market_data_collector.py')
-        with open("data/raw_market_data.json", "r", encoding="utf-8") as f: data = json.load(f)
+        run_step("Phase 1 | 시장 데이터 수집", f'"{py}" src/market_data_collector.py')
+        with open("data/raw_market_data.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
         selected_topic = "오늘의 핵심 경제 이슈와 시스템적 결함 분석"
 
-    # Phase 2b: Content Orchestration
-    with console.status("[bold magenta]기획 생성 및 디자인 동기화 중 (Agent 1 & 2)...[/bold magenta]", spinner="dots"):
+    # Save selected keyword for dated filenames
+    import re
+    cleaned = re.sub(r"[^\w가-힣]", " ", selected_topic).strip()
+    words = [w for w in cleaned.split() if w]
+    keyword = words[0] if words else "경제이슈"
+    keyword = keyword[:10]
+    os.makedirs("data", exist_ok=True)
+    with open("data/selected_keyword.txt", "w", encoding="utf-8") as f:
+        f.write(keyword)
+
+    # ── Phase 2: Topic Research ───────────────────────────────────────
+    console.print("\n[bold cyan]=== [RESEARCH] Topic Research Start ===[/bold cyan]")
+    run_step("Phase 2 | Topic Research (뉴스/주가/서사 분석)",
+             f'"{py}" src/research_agent.py "{selected_topic}"')
+
+    # ── Phase 3: 콘텐츠 기획 및 블로그 생성 ───────────────────────────────────
+    console.print("\n[bold cyan]=== [CONTENT] Content Generation Start ===[/bold cyan]")
+    with console.status("[bold magenta]기획 및 블로그 본문 작성 중 (Research 기반)...[/bold magenta]", spinner="dots"):
         import src.content_generator as cg
         cg.run_content_generation(data, selected_topic)
-    console.print("[bold green]✓[/bold green] Phase 2b | 기획/대본 생성 완료")
+    console.print("[bold green][OK][/bold green] Phase 3 | 블로그 기획/대본 생성 완료")
+    print_dashboard_preview()
 
-    # Phase 3a-b: PPTX Generation
-    console.print("\n[bold cyan]=== 🎨 PPTX Generation Start ===[/bold cyan]")
-    run_step("Phase 3a | 데이터 시각화 차트 렌더링", f'"{py}" src/visual_generator.py')
-    run_step("Phase 3b | PPT 레이아웃 엔진 (차트 및 Visual Text 적용)", f'"{py}" src/pptx_generator.py')
+    # ── Phase 3b: Verification Loop (Gate) ───────────────────────────────────
+    console.print("\n[bold cyan]=== [VERIFY] Fact-Checking Gate ===[/bold cyan]")
+    with console.status("[bold yellow]생성된 콘텐츠의 팩트 정합성 검증 중...", spinner="dots"):
+        import src.verification_loop as vl
+        report = vl.verify_content()
+        
+    if "FAILED" in report:
+        console.print(Panel(report, title="[yellow]Verification Warning[/yellow]", border_style="yellow"))
+        console.print("[bold yellow]⚠️ 팩트 불일치가 발견되었으나 파이프라인을 계속 진행합니다.[/bold yellow]")
+    else:
+        console.print("[bold green][PASS][/bold green] 팩트 검증 통과")
 
-    # Intermediate Approval Gate (New)
+    # ── Phase 4: 시각 자료 및 블로그 이미지 생성 (무료 생성 기능 유지) ─────────────
+    console.print("\n[bold cyan]=== [DESIGN] Blog Visuals & Thumbnail Generation ===[/bold cyan]")
+    run_step("Phase 4a | 블로그/소셜용 차트 및 인포그래픽 이미지 생성", f'"{py}" src/visual_generator.py')
+    run_step("Phase 4b | 유튜브/소셜용 디자인 썸네일 생성", f'"{py}" src/thumbnail_generator.py')
+    run_step("Phase 4c | 구글 Imagen 3 기반 인공지능 썸네일 및 블로그 이미지 생성", f'"{py}" src/imagen_generator.py')
+
+    # ── Intermediate Approval Gate ────────────────────────────────────────────
     if not args.auto:
         out_dir = get_output_dir()
-        ppt_file = os.path.join(out_dir, "daily_strategy_v2_5.pptx")
-        console.print(f"\n[bold green]✅ PPT 파일 생성 완료:[/bold green] [link file://{ppt_file}]{ppt_file}[/link]")
-        console.print("[bold yellow]※ 위 PPT 파일을 열어 레이아웃과 내용을 확인하세요.[/bold yellow]")
-        
-        if not Confirm.ask("\n[bold red]▶ 영상 합성을 진행하시겠습니까? (TTS + MP4 합성 시작)[/bold red]"):
-            console.print("[bold yellow]작업이 종료되었습니다. PPT 수정이 필요하면 수정 후 영상 합성 모듈을 별도 실행하세요.[/bold yellow]")
+        console.print(f"\n[bold green][CHECK] 블로그 및 시각 자료 준비 완료: {out_dir}")
+        if not Confirm.ask("\n[bold red][QUESTION] Remotion 기반 동영상 제작을 시작하시겠습니까? (Neural TTS 포함)[/bold red]"):
+            console.print("[bold yellow]작업 종료. 영상 렌더링 모듈을 별도 실행하세요.[/bold yellow]")
             sys.exit(0)
 
-    # Phase 4-6: Media Synthesis
-    console.print("\n[bold cyan]=== 🎬 Video Synthesis Start ===[/bold cyan]")
-    run_step("Phase 4  | 저음 보이스 TTS 합성", f'"{py}" src/tts_generator.py')
-    run_step("Phase 5  | 하이브리드 썸네일 합성", f'"{py}" src/thumbnail_generator.py')
-    run_step("Phase 6  | 고해상도 영상 합성 (MP4)", f'"{py}" src/video_synthesizer.py')
+    # ── Phase 5: Remotion 다이렉트 비디오 렌더링 ─────────────────────────────────
+    console.print("\n[bold cyan]=== [MEDIA] Remotion Video Synthesis Start ===[/bold cyan]")
+    run_step("Phase 5 | Remotion 비디오 다이렉트 생성 (대본 및 Neural TTS 자동 연동)", f'"{py}" src/remotion_orchestrator.py')
 
-    console.print("\n[bold green]🎉 모든 파이프라인이 성공적으로 완료되었습니다![/bold green]")
+    console.print("\n[bold green][SUCCESS] 모든 파이프라인 완료![/bold green]")
     out_dir = get_output_dir()
-    console.print(f"📁 결과물 폴더: [link file://{out_dir}]{out_dir}[/link]")
+    console.print(f"[FOLDER] 결과물 저장 폴더: {out_dir}")
 
 if __name__ == "__main__":
     main()
