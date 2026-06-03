@@ -15,7 +15,7 @@ if sys.platform == "win32":
 sys.path.insert(0, os.path.dirname(__file__))
 from output_paths import get_path, get_output_dir, get_dated_path
 
-REMOTION_DIR = r"D:\04_Antigravity_wp\Remotion"
+REMOTION_DIR = os.getenv("REMOTION_DIR", r"D:\04_Antigravity_wp\Remotion")
 
 # ── 1. Gemini 기반 고품격 애널리스트 대본 자동 생성 ───────────────────────────
 def generate_analyst_script(report_data: dict) -> dict:
