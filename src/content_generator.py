@@ -173,7 +173,18 @@ def _load_research_context(research: dict) -> str:
     if research.get("economic_background"):
         parts.append(f"[경제 이론적 배경]\n{research['economic_background']}")
     if research.get("back_data_trends"):
-        parts.append(f"[과거 백데이터 추이 — 반드시 기획 및 본문에 적극 반영]\n{research['back_data_trends']}")
+        trend = research["back_data_trends"]
+        if isinstance(trend, dict) and "key" in trend:
+            trend_str = (
+                f"[{trend.get('key')} 최근 10영업일 추이] "
+                f"시작일({trend.get('start_date')}) 종가 {trend.get('start_val')} 대비 "
+                f"종료일({trend.get('end_date')}) 종가 {trend.get('end_val')}로 "
+                f"{trend.get('change_pct')}% 변동. "
+                f"최고치: {trend.get('max_val')}, 최저치: {trend.get('min_val')}"
+            )
+        else:
+            trend_str = str(trend)
+        parts.append(f"[과거 백데이터 추이 — 반드시 기획 및 본문에 적극 반영]\n{trend_str}")
     if research.get("key_news_summary"):
         parts.append(f"[주요 뉴스 요약]\n{research['key_news_summary']}")
     if research.get("macro_interpretation"):
