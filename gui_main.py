@@ -33,6 +33,8 @@ def run_process_realtime(cmd, on_line_cb, on_complete_cb):
             else:
                 cmd_str = cmd
 
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
             process = subprocess.Popen(
                 cmd_str,
                 shell=True,
@@ -41,7 +43,8 @@ def run_process_realtime(cmd, on_line_cb, on_complete_cb):
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                startupinfo=startupinfo
+                startupinfo=startupinfo,
+                env=env
             )
             
             while True:
@@ -162,7 +165,7 @@ class MoneyDaddyGUI:
         self.btn_confirm_topic = ttk.Button(input_frame, text="확정", width=8, command=self.confirm_topic_input)
         self.btn_confirm_topic.pack(side=tk.LEFT, padx=(5, 0))
         
-        self.lbl_topic_status = ttk.Label(input_frame, text="주제를 선택해 주세요", foreground="#AAAAAA")
+        self.lbl_topic_status = ttk.Label(prop_frame, text="주제를 선택해 주세요", foreground="#AAAAAA")
         self.lbl_topic_status.pack(anchor="w", pady=2)
         
         gen_ctrl_frame = ttk.LabelFrame(left_frame, text=" 2. 콘텐츠 기획 및 블로그 원고 생성 (검토) ", padding=10)
