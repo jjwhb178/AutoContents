@@ -126,6 +126,15 @@ def generate_analyst_script(report_data: dict) -> dict:
             clean_json = clean_json[start:end+1]
         
         result = json.loads(clean_json)
+        # 생성된 대본의 키 검증 및 타입 안전성 보완
+        fallback_data = get_fallback_script(video_structure)
+        for i in range(1, N + 1):
+            key = f"scene{i}"
+            if key not in result or not result[key] or not str(result[key]).strip():
+                print(f"[Orchestrator] Warning: 생성 대본에 {key}가 누락되었거나 비어 있어 폴백 문구를 적용합니다.")
+                result[key] = fallback_data[key]
+            else:
+                result[key] = str(result[key]).strip()
         return result
     except Exception as e:
         print(f"[Orchestrator] 대본 생성 API 오류: {e}. 폴백 대본을 사용합니다.")
@@ -257,9 +266,11 @@ export const VIDEO_FPS = 30;
     scene_components = []
     for i, s in enumerate(video_structure, start=1):
         title = s.get("title", f"씬 {i}")
+        title = str(title) if title is not None else f"씬 {i}"
         title_escaped = escape_js(title)
         
         caption_layout = s.get("caption_layout", title)
+        caption_layout = str(caption_layout) if caption_layout is not None else title
         caption_parts = [p.strip() for p in caption_layout.split('/')]
         caption_jsx = " <br /> ".join([f'{{"{escape_js(p)}"}}' for p in caption_parts])
         
