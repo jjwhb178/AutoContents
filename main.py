@@ -59,6 +59,7 @@ def get_proposals():
         "\n".join([f"[bold]{p['id']}. {p['type']} - {p['title']}[/bold]\n  └ {p['reason']}" for p in proposals]),
         title="오늘의 기획 제안 (Proposals)"
     ))
+    choice = Prompt.ask("주제 번호를 선택하거나 직접 입력하세요", default="1")
     try:
         idx = int(choice) - 1
         if 0 <= idx < len(proposals):
