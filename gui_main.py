@@ -102,17 +102,19 @@ class MoneyDaddyGUI:
                         
             logic_path = "data/latest_content_logic.json"
             if os.path.exists(logic_path):
-                with open(logic_path, "r", encoding="utf-8") as f:
-                    logic = json.load(f)
-                    self.confirmed_topic = f"[{logic.get('theme_analysis', '기존')}] {logic.get('title')}"
-                    self.has_draft = True
-                    self.lbl_topic_status.config(text=f"✓ 기존 기획 로드됨")
-                    self.btn_gen.config(state=tk.NORMAL)
-                    self.btn_media.config(state=tk.NORMAL)
-                    self.btn_open_folder.config(state=tk.NORMAL)
-                    self.btn_blog_post.config(state=tk.NORMAL)
-                    self.btn_youtube_upload.config(state=tk.NORMAL)
-                    self.update_preview(logic)
+                mtime = os.path.getmtime(logic_path)
+                if datetime.fromtimestamp(mtime).date() == datetime.now().date():
+                    with open(logic_path, "r", encoding="utf-8") as f:
+                        logic = json.load(f)
+                        self.confirmed_topic = f"[{logic.get('theme_analysis', '기존')}] {logic.get('title')}"
+                        self.has_draft = True
+                        self.lbl_topic_status.config(text=f"✓ 기존 기획 로드됨")
+                        self.btn_gen.config(state=tk.NORMAL)
+                        self.btn_media.config(state=tk.NORMAL)
+                        self.btn_open_folder.config(state=tk.NORMAL)
+                        self.btn_blog_post.config(state=tk.NORMAL)
+                        self.btn_youtube_upload.config(state=tk.NORMAL)
+                        self.update_preview(logic)
         except Exception as e:
             self.log(f"세션 복구 중 오류: {e}")
 
@@ -292,8 +294,18 @@ class MoneyDaddyGUI:
         else:
             user_keyword = None
             
-        # 이전 세션 캐시 파일 클리어
-        for filename in ["latest_content_logic.json", "research_report.json", "O_FactSheet.md", "selected_keyword.txt"]:
+        # 이전 세션 캐시 파일 클리어 (이전 일자의 블루프린트 및 지식 그래프 포함)
+        cache_files = [
+            "latest_content_logic.json", 
+            "research_report.json", 
+            "O_FactSheet.md", 
+            "selected_keyword.txt",
+            "O_Video_Blueprint.md",
+            "O_PPT_Blueprint.md",
+            "daily_knowledge_graph.json",
+            "knowledge_graph.html"
+        ]
+        for filename in cache_files:
             filepath = os.path.join("data", filename)
             if os.path.exists(filepath):
                 try:
