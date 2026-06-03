@@ -2,6 +2,18 @@ import sys, os, json, time
 from datetime import datetime
 import google.generativeai as genai
 
+# Windows CP949 환경에서 이모지 등 유니코드 출력 시 UnicodeEncodeError 방지
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if sys.stderr.encoding != 'utf-8':
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 sys.path.insert(0, os.path.dirname(__file__))
 from output_paths import get_path, get_dated_path
 from text_cleaner import clean_for_blog
@@ -112,15 +124,19 @@ def load_guides():
     return guides
 
 # ── 1. 제안 로직 (Multi-Proposal) ──────────────────────────────────────────
-def propose_topics(data: dict) -> list:
-    """뉴스를 분석하여 3개의 주제 후보를 제안합니다."""
+def propose_topics(data: dict, keyword: str = None) -> list:
+    """뉴스를 분석하여 3개의 주제 후보를 제안합니다. 사용자가 입력한 수동 키워드가 있으면 이를 최우선으로 반영합니다."""
     model = genai.GenerativeModel("gemini-2.5-flash", generation_config={"response_mime_type": "application/json"})
     news = data.get("market_news", [])
     import datetime
     today_str = datetime.datetime.now().strftime("%Y년 %m월 %d일")
     
+    keyword_instruction = ""
+    if keyword:
+        keyword_instruction = f"\n[최우선 반영 요구사항]\n사용자가 입력한 관심 키워드(종목/섹터/이슈)는 **'{keyword}'**입니다. 실시간 뉴스 데이터와 더불어 이 키워드 관련 내용을 최우선적으로 다루는 주제 3가지를 제안해 주세요. 키워드의 의도를 파악하여 거시/심리/수급의 맥락에 맞춰 주제를 도출하십시오."
+
     prompt = f"""당신은 머니대디의 수석 비서입니다. 
-오늘은 {today_str}입니다. 아래 실시간 뉴스 속보를 분석하여, 오늘 **미국 증시와 한국 증시에 가장 큰 영향을 미칠 핵심 뉴스 이슈** 3가지를 도출하세요.
+오늘은 {today_str}입니다. 아래 실시간 뉴스 속보를 분석하여, 오늘 **미국 증시와 한국 증시에 가장 큰 영향을 미칠 핵심 뉴스 이슈** 3가지를 도출하세요.{keyword_instruction}
 
 실시간 뉴스 속보: {news}
 
@@ -185,7 +201,7 @@ def _load_research_context(research: dict) -> str:
 
 def agent_plan_structure(data: dict, pivot: dict | None, topic: str,
                          feedback: str = "", research: dict = None) -> dict:
-    """Step 1: 전체적인 서사 구조와 슬라이드별 아키타입 및 핵심 논리를 기획합니다."""
+    """Step 1: 전체적인 서사 구조와 비디오 씬별 핵심 논리를 기획합니다."""
     model = genai.GenerativeModel("gemini-2.5-flash", generation_config={"response_mime_type": "application/json"})
 
     filtered_data = {
@@ -207,12 +223,10 @@ def agent_plan_structure(data: dict, pivot: dict | None, topic: str,
         pivot_inst = "\n[주의] 본 리포트는 부동산 중심입니다. 주식 섹터 수급(Pivot)보다는 부동산 실거래가, 금리, 규제 정책이 자산 시장 재편에 미치는 영향에 집중하세요."
 
     research_block = _load_research_context(research or {})
-    guides = load_guides()
-    ppt_design_guide = guides.get('O2_PPT_Architecture.md', '')
 
-    prompt = f"""당신은 "머니대디 경제 분석가" 페르소나를 가진 수석 전략가입니다. 주제 "{topic}"에 대한 PPT와 2,500자 블로그의 **구조 설계도**를 작성하세요.
+    prompt = f"""당신은 "머니대디 경제 분석가" 페르소나를 가진 수석 전략가입니다. 주제 "{topic}"에 대한 Remotion 영상(5~10씬)과 블로그의 **구조 설계도**를 작성하세요.
 차트 타점이나 FVG(Fair Value Gap), 지지/저항 등 기술적 분석 및 가격 기반 매수 타점 분석 명세를 프롬프트와 분석에서 완전히 배제하고, "과거 백데이터 추이 및 실시간 자금 흐름(수급)과 거시 경제 이슈"를 바탕으로 전문적이고 깊이 있는 통찰을 구조화하십시오.
-더 이상 18페이지라는 제한에 얽매일 필요가 없으며, 리서치 팩트 데이터의 성격과 볼륨에 맞추어 최적의 슬라이드 수(보통 5~10장 내외)를 스스로 설계하십시오.
+리서치 팩트 데이터의 성격과 볼륨에 맞추어 최적의 비디오 씬 수(보통 5~10씬 내외)를 스스로 설계하십시오.
 
 [시장 상황 요약]
 {json.dumps(filtered_data, ensure_ascii=False)}
@@ -220,36 +234,35 @@ def agent_plan_structure(data: dict, pivot: dict | None, topic: str,
 
 {research_block}
 
-[PPT 구조 가이드라인 및 아키타입 규칙]
-{ppt_design_guide}
-
 [현재 시점 (Current Time)]
 {datetime.now().strftime('%Y-%m-%d %H:%M')}
 
 [절대 지침]
 1. **시점 인식**: 위 [현재 시점]을 절대적 현재로 간주하고, 오늘의 리서치 결과 수치를 무조건 우선하여 사용하십시오.
 2. **'아키텍트' 용어 사용 금지**: 자신을 '시스템 아키텍트'라 부르지 마십시오. '머니대디 경제 분석가' 페르소나를 사용하여 작성하십시오.
-3. **아키타입 매핑**: 각 슬라이드는 반드시 아래 9가지 아키타입 중 하나를 지정해야 합니다.
-   - Title, Agenda, Problem, Solution, Features, Stats, Team, CTA, Closing
-4. **과거 백데이터 및 수급 흐름 반영**: 리서치 리포트의 `back_data_trends` (과거 백데이터 추이) 데이터를 적극적으로 기획 구조와 슬라이드별 핵심 논리에 녹여내십시오. 실시간 자금 흐름(수급)과 거시 경제 동향을 유기적으로 연계하십시오.
+3. **비디오 씬 기획**: 비디오 씬별 제목, 핵심 논리, 자막 텍스트 레이아웃을 기획하도록 지침을 지정하십시오.
+4. **과거 백데이터 및 수급 흐름 반영**: 리서치 리포트의 `back_data_trends` (과거 백데이터 추이) 데이터를 적극적으로 기획 구조와 씬별 핵심 논리에 녹여내십시오. 실시간 자금 흐름(수급)과 거시 경제 동향을 유기적으로 연계하십시오.
 5. **기술적 분석 및 타점 완전 배제**: FVG, Price Action, 지지/저항선, 가격 기반 매수 타점 분석 등의 기술적 지표 및 명세를 일절 사용하지 마십시오.
-6. **팩트 인용**: 리서치 결과의 구체적 수치를 슬라이드 구성 논리에 명확하게 배치하십시오.
-7. **지식 그래프 연동**: 위 [오늘 시장의 인과 관계 지식 그래프 (Graph RAG)]의 노드들과 엣지 관계(인과 관계 흐름)가 슬라이드 전체의 논리 전개(`core_logic`)에 자연스럽고 명확하게 연결되도록 구조화하십시오.
-8. **지표 중복 배정 금지**: 슬라이드 구조를 기획할 때, 여러 개의 Stats 슬라이드에 동일한 지표나 수치(예: 3페이지와 6페이지 모두 Fear & Greed 지수 34를 사용하는 것)를 중복해서 사용하지 마십시오. 3페이지에는 공포/탐욕 지수(34), 6페이지에는 코스피 지수(7847.71)나 VIX(17.01)처럼 각 슬라이드마다 서로 다른 핵심 지표를 배분하십시오.
-
-
+6. **팩트 인용**: 리서치 결과의 구체적 수치를 씬 구성 논리에 명확하게 배치하십시오.
+7. **지식 그래프 연동**: 위 [오늘 시장의 인과 관계 지식 그래프 (Graph RAG)]의 노드들과 엣지 관계(인과 관계 흐름)가 영상 전체의 논리 전개(`core_logic`)에 자연스럽고 명확하게 연결되도록 구조화하십시오.
+8. **인포그래픽 카드 데이터 구성**: `visual_asset`의 `type`이 `infographic_flow` 또는 `infographic_compare` 일 때는 반드시 흐름 단계 또는 비교 항목으로 표시할 핵심 요약 문구 2~4개를 `"visual_elements"` 리스트에 배열 형태로 담아주십시오. (예: `["자금 이탈", "소부장 이동"]`) 그 외의 경우에는 null 또는 빈 배열로 설정하십시오.
 
 출력 JSON 스키마:
 {{
   "structure_id": "unique_id",
   "theme_narrative": "이 콘텐츠가 관통하는 하나의 거대한 서사 (구체적 수치 포함)",
-  "ppt_structure": [
+  "video_structure": [
     {{ 
-      "page": 1, 
-      "topic": "제목", 
-      "slide_type": "Title", 
-      "core_logic": "이 페이지에서 전달할 핵심 논리", 
-      "visual_intent": "시각적 의도 또는 필요한 차트/이미지 묘사" 
+      "scene": 1, 
+      "title": "씬 제목 (25자 이내)", 
+      "core_logic": "이 씬에서 전달할 핵심 논리 및 수치 팩트 (100자 이내)", 
+      "caption_layout": "자막 텍스트 레이아웃 (예: '핵심 요약 라인1 / 라인2')",
+      "visual_asset": {{
+        "type": "chart_macro 또는 chart_sector 또는 chart_fear_greed 또는 infographic_flow 또는 infographic_compare 또는 image_issue 또는 none",
+        "fallback_text": "대체텍스트(20자)"
+      }},
+      "visual_intent": "시각적 의도 또는 필요한 차트/이미지 묘사 (50자 이내)",
+      "visual_elements": ["요소1(10자이내)", "요소2(10자이내)", "요소3(10자이내)"]
     }},
     ...
   ],
@@ -262,34 +275,47 @@ def agent_plan_structure(data: dict, pivot: dict | None, topic: str,
     logic = call_gemini_with_retry(model, prompt)
     
     # Blueprint MD 생성
-    blueprint_path = "data/O_PPT_Blueprint.md"
-    bp_content = f"""# 🗺️ MoneyDaddy PPT Blueprint: {topic}
+    blueprint_path = "data/O_Video_Blueprint.md"
+    bp_content = f"""# 🗺️ MoneyDaddy Video Blueprint: {topic}
 
 ## 1. 주제 서사 (Narrative)
 {logic.get('theme_narrative', 'N/A')}
 
-## 2. 슬라이드별 구성 설계 ({len(logic.get("ppt_structure", []))} Slides)
-| Page | Topic | Slide Type | Core Logic / Fact to Use | Visual Intent |
+## 2. 비디오 씬별 구성 설계 ({len(logic.get("video_structure", []))} Scenes)
+| Scene | Title | Core Logic / Fact to Use | Caption Layout | Visual Intent |
 |---|---|---|---|---|
 """
-    for s in logic.get("ppt_structure", []):
-        bp_content += f"| {s['page']} | {s['topic']} | {s.get('slide_type', 'N/A')} | {s['core_logic']} | {s.get('visual_intent', 'N/A')} |\n"
+    for s in logic.get("video_structure", []):
+        bp_content += f"| {s['scene']} | {s['title']} | {s['core_logic']} | {s.get('caption_layout', 'N/A')} | {s.get('visual_intent', 'N/A')} |\n"
     
     bp_content += f"\n## 3. 블로그 구성 전략\n- **Intro**: {logic.get('blog_structure', {}).get('intro_logic')}\n- **Insight**: {logic.get('blog_structure', {}).get('insight_logic')}\n"
     
     with open(blueprint_path, "w", encoding="utf-8") as f:
         f.write(bp_content)
-    print(f"  [Planning] Blueprint generated at {blueprint_path}")
+    print(f"  [Planning] Video Blueprint generated at {blueprint_path}")
     
     return logic
 
 def agent_write_blog(structure: dict, data: dict, topic: str, research: dict = None) -> dict:
     """Step 2: 설계도를 바탕으로 블로그 본문을 집중적으로 작성합니다 (2,500자+)."""
-    model = genai.GenerativeModel("gemini-2.5-pro", generation_config={"response_mime_type": "application/json"})
+    # 머니대디 수석 집필 비서 페르소나 및 가독성/정제 규칙을 System Instruction으로 정의
+    system_instruction = (
+        "당신은 자금 흐름과 거시경제적 관점에서 시장을 날카롭게 해설하는 채널 '머니대디'의 수석 집필 비서이자 에디터입니다.\n"
+        "다음 글쓰기 가독성 및 음성 합성 정제 규칙을 반드시 준수하여 블로그 본문을 작성해 주세요:\n"
+        "1. 글쓰기 가독성 원칙: 문단은 독자가 읽기 편하도록 3~4줄 내외로 짧게 구성하고, 주요 키워드와 수치는 볼드 강조 처리(**텍스트**)합니다.\n"
+        "2. 음성 합성용 정제 필터 규칙: 향후 TTS(내레이션) 변환 및 음성 합성을 고려하여 본문 내 괄호 ( ) 및 특수 기호를 최대한 배제하고, 자연스럽게 서술형 문장으로 풀어서 작성합니다."
+    )
+
+    model = genai.GenerativeModel(
+        "gemini-2.5-flash",
+        generation_config={"response_mime_type": "application/json"},
+        system_instruction=system_instruction
+    )
     guides = load_guides()
     research_block = _load_research_context(research or {})
 
-    prompt = f"""당신은 머니대디의 수석 에디터입니다. [구조 설계도]와 [리서치 분석 결과]를 바탕으로 **블로그 본문**을 작성하세요.
+    # 사용자 프롬프트 템플릿에서 시스템 지침으로 격상된 중복 지침을 제거하여 다이어트합니다.
+    prompt = f"""[구조 설계도]와 [리서치 분석 결과]를 바탕으로 **블로그 본문**을 작성하세요.
 
 [가이드라인]
 {guides.get('O1_blog.md', '')}
@@ -313,11 +339,8 @@ def agent_write_blog(structure: dict, data: dict, topic: str, research: dict = N
 4. **인과 관계 서사**: [오늘 시장의 인과 관계 지식 그래프 (Graph RAG)]에서 도출된 사건의 원인과 결과, 파급 효과의 흐름이 블로그 전체에 일관되게 전개되어 매끄러운 흐름을 만들도록 하십시오.
 
 5. **필수 지표 포함**: 다음 5대 시장 지표와 수치를 본문(블로그 내용)에 자연스럽고 정확하게 반드시 직접 언급하여 기술하십시오: 코스피 지수(KOSPI), 공포지수 VIX, 미 국채 10년물 금리, 원/달러 환율, 공포/탐욕 지수. (예: "금일 코스피 지수는 XX.XX포인트를 기록했으며...", "공포지수 VIX는 XX.XX로...")
-6. **이미지 플레이스홀더 강제**: 블로그 본문(`blog_draft`) 내부에서 가이드라인의 이미지 4개 배치에 대응하는 논리적 문맥 위치에 각각 `[이미지1]`, `[이미지2]`, `[이미지3]`, `[이미지4]`라는 텍스트 플레이스홀더를 대괄호를 포함해 명시적으로 삽입하십시오. (예: `... 분석해 보겠습니다.\n\n[이미지1]\n\n다음으로 ...`)
+6. **이미지 플레이스홀절 강제**: 블로그 본문(`blog_draft`) 내부에서 가이드라인의 이미지 4개 배치에 대응하는 논리적 문맥 위치에 각각 `[이미지1]`, `[이미지2]`, `[이미지3]`, `[이미지4]`라는 텍스트 플레이스홀더를 대괄호를 포함해 명시적으로 삽입하십시오. (예: `... 분석해 보겠습니다.\n\n[이미지1]\n\n다음으로 ...`)
 7. **해시태그 필수**: 블로그 본문(`blog_draft`)의 가장 마지막 부분에 관련성 높은 해시태그를 15개 이상(예: `#머니대디 #주식투자 #반도체 ...`) 반드시 추가하십시오.
-
-
-
 
 출력 JSON 스키마:
 {{
@@ -330,271 +353,6 @@ def agent_write_blog(structure: dict, data: dict, topic: str, research: dict = N
     return call_gemini_with_retry(model, prompt)
 
 # ── 글자 수 제한 강제 적용 ──────────────────────────────────────────────────
-SLIDE_LIMITS = {
-    "Title":             {"title": 30, "subtitle": 35, "brand_tag": 8, "date": 15, "presenter": 10},
-    "Agenda":            {"title": 20, "item": 25},
-    "Problem":           {"title": 20, "bullet": 45, "label": 10, "description": 40},
-    "Solution":          {"title": 20, "subtitle": 35, "point": 35, "visual_desc": 50},
-    "Features":          {"title": 20, "name": 10, "description": 20},
-    "Stats":             {"title": 20, "value": 10, "unit": 8, "delta": 15, "description": 45},
-    "Team":              {"title": 20, "name": 8, "role": 12, "career": 15},
-    "CTA":               {"title": 20, "proposal": 40, "button_text": 15, "contact": 20},
-    "Closing":           {"title": 20, "message": 30, "contact": 20},
-}
-
-def enforce_field_limits(ppt_script: dict) -> dict:
-    """슬라이드 각 필드 글자 수 초과 시 compress_to_fit 호출"""
-    for page_key, slide in ppt_script.items():
-        stype = slide.get("slide_type", "Problem").capitalize()
-        # 대소문자 매핑 안정화
-        if stype == "Title_only":
-            stype = "Title"
-        elif stype == "Big_number":
-            stype = "Stats"
-        elif stype == "Headline_bullets":
-            stype = "Problem"
-        elif stype == "Three_cards":
-            stype = "Problem"
-        elif stype == "Left_text_right_visual":
-            stype = "Solution"
-        elif stype == "Flow_steps":
-            stype = "Solution"
-
-        limits = SLIDE_LIMITS.get(stype, {})
-
-        # 공통 title
-        if "title" in slide and len(slide["title"]) > limits.get("title", 20):
-            slide["title"] = compress_to_fit(slide["title"], limits["title"])
-
-        # Title 아키타입
-        if stype == "Title":
-            if "subtitle" in slide and len(slide["subtitle"]) > limits.get("subtitle", 25):
-                slide["subtitle"] = compress_to_fit(slide["subtitle"], limits["subtitle"])
-            if "brand_tag" in slide and len(slide["brand_tag"]) > limits.get("brand_tag", 8):
-                slide["brand_tag"] = compress_to_fit(slide["brand_tag"], limits["brand_tag"])
-            if "date" in slide and len(slide["date"]) > limits.get("date", 15):
-                slide["date"] = compress_to_fit(slide["date"], limits["date"])
-            if "presenter" in slide and len(slide["presenter"]) > limits.get("presenter", 10):
-                slide["presenter"] = compress_to_fit(slide["presenter"], limits["presenter"])
-
-        # Agenda 아키타입
-        elif stype == "Agenda":
-            if "items" in slide:
-                lim = limits.get("item", 25)
-                slide["items"] = [
-                    compress_to_fit(item, lim) if len(item) > lim else item
-                    for item in slide["items"][:6]
-                ]
-
-        # Problem 아키타입
-        elif stype == "Problem":
-            if "bullets" in slide:
-                lim = limits.get("bullet", 30)
-                slide["bullets"] = [
-                    compress_to_fit(b, lim) if len(b) > lim else b
-                    for b in slide["bullets"][:3]
-                ]
-            if "cards" in slide:
-                for card in slide["cards"][:3]:
-                    if len(card.get("label", "")) > limits.get("label", 10):
-                        card["label"] = compress_to_fit(card["label"], limits["label"])
-                    if len(card.get("description", "")) > limits.get("description", 30):
-                        card["description"] = compress_to_fit(card["description"], limits["description"])
-
-        # Solution 아키타입
-        elif stype == "Solution":
-            if "subtitle" in slide and len(slide["subtitle"]) > limits.get("subtitle", 25):
-                slide["subtitle"] = compress_to_fit(slide["subtitle"], limits["subtitle"])
-            if "points" in slide:
-                lim = limits.get("point", 25)
-                slide["points"] = [
-                    compress_to_fit(p, lim) if len(p) > lim else p
-                    for p in slide["points"][:3]
-                ]
-            if "visual_desc" in slide and len(slide["visual_desc"]) > limits.get("visual_desc", 40):
-                slide["visual_desc"] = compress_to_fit(slide["visual_desc"], limits["visual_desc"])
-
-        # Features 아키타입
-        elif stype == "Features":
-            if "features" in slide:
-                for feat in slide["features"][:6]:
-                    if len(feat.get("name", "")) > limits.get("name", 10):
-                        feat["name"] = compress_to_fit(feat["name"], limits["name"])
-                    if len(feat.get("description", "")) > limits.get("description", 20):
-                        feat["description"] = compress_to_fit(feat["description"], limits["description"])
-
-        # Stats 아키타입
-        elif stype == "Stats":
-            if "value" in slide and len(str(slide["value"])) > limits.get("value", 10):
-                slide["value"] = compress_to_fit(str(slide["value"]), limits["value"])
-            if "unit" in slide and len(slide["unit"]) > limits.get("unit", 8):
-                slide["unit"] = compress_to_fit(slide["unit"], limits["unit"])
-            if "delta" in slide and len(slide["delta"]) > limits.get("delta", 10):
-                slide["delta"] = compress_to_fit(slide["delta"], limits["delta"])
-            if "description" in slide and len(slide["description"]) > limits.get("description", 30):
-                slide["description"] = compress_to_fit(slide["description"], limits["description"])
-
-        # Team 아키타입
-        elif stype == "Team":
-            if "members" in slide:
-                for mem in slide["members"][:4]:
-                    if len(mem.get("name", "")) > limits.get("name", 8):
-                        mem["name"] = compress_to_fit(mem["name"], limits["name"])
-                    if len(mem.get("role", "")) > limits.get("role", 12):
-                        mem["role"] = compress_to_fit(mem["role"], limits["role"])
-                    if len(mem.get("career", "")) > limits.get("career", 15):
-                        mem["career"] = compress_to_fit(mem["career"], limits["career"])
-
-        # CTA 아키타입
-        elif stype == "CTA":
-            if "proposal" in slide and len(slide["proposal"]) > limits.get("proposal", 40):
-                slide["proposal"] = compress_to_fit(slide["proposal"], limits["proposal"])
-            if "button_text" in slide and len(slide["button_text"]) > limits.get("button_text", 15):
-                slide["button_text"] = compress_to_fit(slide["button_text"], limits["button_text"])
-            if "contact" in slide and len(slide["contact"]) > limits.get("contact", 20):
-                slide["contact"] = compress_to_fit(slide["contact"], limits["contact"])
-
-        # Closing 아키타입
-        elif stype == "Closing":
-            if "message" in slide and len(slide["message"]) > limits.get("message", 30):
-                slide["message"] = compress_to_fit(slide["message"], limits["message"])
-            if "contact" in slide and len(slide["contact"]) > limits.get("contact", 20):
-                slide["contact"] = compress_to_fit(slide["contact"], limits["contact"])
-
-    return ppt_script
-
-
-def agent_write_ppt_chunk(structure: dict, data: dict, topic: str, research: dict, start_pg: int, end_pg: int) -> dict:
-    """Step 3 (Chunk): 9대 아키타입 스키마로 PPT 대본 생성"""
-    model = genai.GenerativeModel("gemini-2.5-pro", generation_config={"response_mime_type": "application/json"})
-
-    fact_sheet = ""
-    if os.path.exists("data/O_FactSheet.md"):
-        with open("data/O_FactSheet.md", "r", encoding="utf-8") as f:
-            fact_sheet = f.read()
-
-    full_structure = structure.get("ppt_structure", [])
-    chunk_meta = [s for s in full_structure if start_pg <= int(s.get("page", 0)) <= end_pg]
-
-    kg_block = research.get("graph_narrative", "") if research else ""
-    if kg_block:
-        kg_block = f"\n[오늘 시장의 인과 관계 지식 그래프 (Graph RAG)]\n{kg_block}\n"
-
-    prompt = f"""당신은 머니대디의 PPT 대본 작가입니다. {start_pg}~{end_pg}페이지를 생성하세요.
-
-[절대 기준: 팩트 시트 — 이 수치 외에는 사용 금지]
-{fact_sheet}
-
-{kg_block}
-
-[현재 시점]
-{datetime.now().strftime('%Y-%m-%d %H:%M')}
-
-[구조 설계도 (해당 구간)]
-{json.dumps(chunk_meta, ensure_ascii=False)}
-
-[슬라이드 9대 아키타입별 스키마 및 규칙]
-반드시 슬라이드별로 구조 설계도에 명시된 "slide_type"을 준수하고, 해당 타입에 맞는 필드 구조를 채우십시오.
-
-1. Title (표지)
-   - slide_type: "Title"
-   - title: 슬라이드 메인 제목 (30자 이내)
-   - subtitle: 부제 (25자 이내)
-   - brand_tag: 브랜드 태그 (8자 이내, 예: "머니대디")
-   - date: 날짜 (15자 이내, 예: "2026.05.16")
-   - presenter: 발표자 정보 (10자 이내)
-   - audio_script: 발표용 대본
-
-2. Agenda (목차)
-   - slide_type: "Agenda"
-   - title: 목차 제목 (20자 이내, 예: "Agenda")
-   - items: 목차 항목 리스트 (최대 6개, 각 항목 25자 이내)
-   - audio_script: 발표용 대본
-
-3. Problem (문제 정의)
-   - slide_type: "Problem"
-   - title: 문제 제목 (20자 이내)
-   - bullets: 문제 설명 글머리 목록 (최대 3개, 각 30자 이내)
-   - cards: 개별 문제 카드 목록 (선택 사항, 최대 3개, 각 카드는 {{"label": "라벨(10자)", "description": "설명(30자)"}} 구조)
-   - audio_script: 발표용 대본
-
-4. Solution (해법)
-   - slide_type: "Solution"
-   - title: 해법 제목 (20자 이내)
-   - subtitle: 핵심 가치 한 줄 요약 (25자 이내)
-   - points: 해법 포인트 리스트 (최대 3개, 각 25자 이내)
-   - visual_asset: 시각 자료 매핑 정보 ({{"type": "infographic_flow" 또는 "image_issue", "fallback_text": "대체텍스트(20자)"}})
-   - visual_desc: 시각 자료 요약 설명 (40자 이내)
-   - audio_script: 발표용 대본
-
-5. Features (기능/차별점)
-   - slide_type: "Features"
-   - title: 기능 제목 (20자 이내)
-   - features: 기능 카드 목록 (최대 6개, 각 기능은 {{"name": "기능명(10자)", "description": "설명(20자)"}} 구조)
-   - audio_script: 발표용 대본
-
-6. Stats (통계 강조)
-   - slide_type: "Stats"
-   - title: 통계 제목 (20자 이내)
-   - value: 핵심 수치 (10자 이내, 예: "7493.18" 또는 "4.59")
-   - unit: 단위 (8자 이내, 예: "KOSPI" 또는 "%")
-   - delta: 등락/변동 수치 (10자 이내, 예: "-6.12%" 또는 "+15%")
-   - description: 통계 부연 설명 (30자 이내)
-   - visual_asset: 시각 자료 매핑 정보 ({{"type": "chart_macro" 또는 "chart_sector" 또는 "chart_fear_greed", "fallback_text": "대체텍스트(20자)"}})
-   - audio_script: 발표용 대본
-
-7. Team (팀 소개)
-   - slide_type: "Team"
-   - title: 팀 제목 (20자 이내)
-   - members: 팀원 정보 목록 (최대 4개, 각 팀원은 {{"name": "이름(8자)", "role": "직책(12자)", "career": "경력(15자)"}} 구조)
-   - audio_script: 발표용 대본
-
-8. CTA (행동 요청)
-   - slide_type: "CTA"
-   - title: 행동 요청 제목 (20자 이내)
-   - proposal: 핵심 제안 문장 (40자 이내)
-   - button_text: 버튼용 액션 문구 (15자 이내, 예: "지금 시작하기")
-   - contact: 연락처 정보 (20자 이내)
-   - audio_script: 발표용 대본
-
-9. Closing (마무리)
-   - slide_type: "Closing"
-   - title: 감사 인사 제목 (20자 이내, 예: "감사합니다")
-   - message: 맺음말 메시지 (30자 이내, 예: "Q&A를 진행합니다")
-   - contact: 연락처 정보 (20자 이내)
-   - audio_script: 발표용 대본
-
-[절대 지침]
-1. **팩트 시트에 없는 수치는 절대 사용하지 말며, 기재된 수치(예: KOSPI: 7847.71 등)를 본인의 이전 지식으로 교정하지 말고 100% 한 자도 틀리지 않게 그대로 사용하십시오.**
-2. '시스템 아키텍트' 용어 절대 금지 → '머니대디 경제 분석가'로 지칭
-3. 각 아키타입별 정의된 필드만 채우고, 지정된 글자 수 제한을 초과하면 핵심만 남기고 요약/압축하십시오.
-4. `visual_asset`에 적합한 시각화 `type`을 정확하게 연결하십시오 (`chart_macro`, `chart_sector`, `chart_fear_greed`, `infographic_flow`, `infographic_compare`, `image_issue`, `none`).
-5. **과거 백데이터 및 수급 흐름 반영**: 리서치 리포트의 과거 백데이터 추이 데이터 및 실시간 자금 흐름(수급)과 거시 경제 이슈에 기반하여 깊이 있는 분석을 대본(audio_script)에 담으십시오.
-6. **기술적 분석 배제**: FVG, Price Action, 지지/저항선, 가격 기반 매수 타점 분석 등 기술적 분석 명세를 대본 및 필드에서 완전히 배제하십시오.
-7. **필수 지표 언급**: 5대 시장 지표(코스피 지수(KOSPI), VIX, 미 국채 10년물 금리, 원/달러 환율, 공포/탐욕 지수)의 수치를 적절한 슬라이드(특히 Stats 아키타입이나 대본 audio_script)에 자연스럽고 정확하게 반드시 직접 언급하여 반영하십시오.
-8. **지표 중복 작성 금지**: 여러 개의 Stats 슬라이드를 작성할 때, 다른 슬라이드에 할당된 지표와 중복되는 수치(예: Fear & Greed 34를 두 슬라이드에 동시에 사용하는 경우)가 없도록 하십시오. 3페이지가 Fear & Greed(34)였다면, 6페이지는 코스피 지수(7847.71)나 VIX(17.01) 등 반드시 서로 다른 지표 수치를 매핑해야 합니다.
-
-
-
-
-출력 JSON 스키마 (page_num은 실제 숫자로 대체):
-{{
-  "ppt_script": {{
-    "{start_pg}": {{
-      "slide_type": "Title",
-      "title": "슬라이드 제목",
-      "subtitle": "부제목",
-      "brand_tag": "머니대디",
-      "date": "2026.05.16",
-      "presenter": "머니대디",
-      "audio_script": "브리핑 대본"
-    }},
-    ...
-  }}
-}}"""
-    print(f"  [Step 3] PPT Chunk {start_pg}~{end_pg} 생성 중 (9대 아키타입 스키마)...")
-    return call_gemini_with_retry(model, prompt)
-
 def run_content_generation(data: dict, selected_topic: str, feedback: str = ""):
     pivot = detect_sector_pivot(data)
 
@@ -619,27 +377,14 @@ def run_content_generation(data: dict, selected_topic: str, feedback: str = ""):
     with open(get_dated_path("블로그초안", "md"), "w", encoding="utf-8") as f:
         f.write(clean_for_blog(blog_content))
 
-    # [3단계] PPT 분할 생성 (동적 슬라이드 수 대응)
-    full_structure = structure.get("ppt_structure", [])
-    total_slides = len(full_structure)
-    combined_ppt = {}
-    
-    # 5장 단위로 청크 처리
-    chunk_size = 5
-    for start_idx in range(1, total_slides + 1, chunk_size):
-        end_idx = min(start_idx + chunk_size - 1, total_slides)
-        chunk_data = agent_write_ppt_chunk(structure, data, selected_topic, research, start_idx, end_idx)
-        if chunk_data and "ppt_script" in chunk_data:
-            combined_ppt.update(chunk_data["ppt_script"])
-
-    # [4단계] 필드 글자 수 초과 검사 및 의미 유지 압축
-    print("  [Step 4] 필드 글자 수 검증 및 의미 유지 압축 실행...")
-    combined_ppt = enforce_field_limits(combined_ppt)
+    # 하위 호환성을 위해 verification_loop 및 대시보드에서 사용하는 daily_content_draft.md 에도 동일하게 저장
+    with open(get_path("daily_content_draft.md"), "w", encoding="utf-8") as f:
+        f.write(clean_for_blog(blog_content))
 
     final_result = {
         "title": title,
         "theme_analysis": structure.get("theme_narrative", ""),
-        "ppt_script": combined_ppt,
+        "video_structure": structure.get("video_structure", []),
         "blog_images": blog_data.get("blog_images", []) if isinstance(blog_data, dict) else [],
         "youtube_desc": f"{title}\n\n오늘의 핵심 리포트입니다."
     }
@@ -647,7 +392,7 @@ def run_content_generation(data: dict, selected_topic: str, feedback: str = ""):
     with open("data/latest_content_logic.json", "w", encoding="utf-8") as f:
         json.dump(final_result, f, indent=4, ensure_ascii=False)
     
-    print(f"  [Final] Dynamic Slide Pipeline Completed: {total_slides} slides.")
+    print(f"  [Final] Content Pipeline Completed (Remotion Video Scene Planning).")
     return final_result
 
 if __name__ == "__main__":

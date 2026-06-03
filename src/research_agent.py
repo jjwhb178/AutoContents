@@ -20,6 +20,18 @@ from bs4 import BeautifulSoup
 import yfinance as yf
 import google.generativeai as genai
 
+# Windows CP949 환경에서 이모지 등 유니코드 출력 시 UnicodeEncodeError 방지
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if sys.stderr.encoding != 'utf-8':
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 sys.path.insert(0, os.path.dirname(__file__))
 from output_paths import get_path
 from graph_rag import DailyKnowledgeGraph
@@ -236,9 +248,19 @@ def run_citation_forced_analysis(topic: str, news_list: list,
         return {}
     genai.configure(api_key=api_key)
 
+    # 머니대디 수석 리서치 애널리스트 페르소나 및 Citation-Forced Grounding 핵심 원칙을 System Instruction으로 분리
+    system_instruction = (
+        "당신은 자금 흐름과 거시경제적 관점에서 시장을 날카롭게 해설하는 유튜브/블로그 채널 '머니대디'의 수석 리서치 애널리스트(경제 분석가)입니다.\n"
+        "다음 Citation-Forced Grounding의 핵심 원칙을 반드시 준수하여 분석을 진행해 주세요:\n"
+        "1. 인용구 코드 검증 원칙: 작성하는 모든 주장(claim) 및 관계(edge)는 반드시 제공된 뉴스 본문에서 그대로 발췌한 인용구(quoted_text)와 출처 기사 번호(source_article)를 기반으로 작성해야 하며, 뉴스에 실재하지 않는 내용을 기재해서는 안 됩니다.\n"
+        "2. 수치 코드 검증 원칙: 거시경제 지표 및 시장 수치를 인용할 때는 제공된 공식 마켓 데이터(macro_context) 및 동적 백데이터와 정확하게 일치해야 하며, 과거 학습 지식 등으로 임의 보정하거나 수치를 변경해서는 안 됩니다.\n"
+        "3. 인과관계 규명 원칙: 금리, 환율, 원자재 등의 거시지표 변동과 자금 흐름(수급) 간의 객관적인 인과관계를 철저하게 분석하되, 사변적인 추측이나 뇌피셜은 배제해야 합니다."
+    )
+
     model = genai.GenerativeModel(
         "gemini-2.5-pro",
-        generation_config={"response_mime_type": "application/json"}
+        generation_config={"response_mime_type": "application/json"},
+        system_instruction=system_instruction
     )
 
     # 뉴스 목록 (인덱스 포함)
@@ -246,8 +268,8 @@ def run_citation_forced_analysis(topic: str, news_list: list,
         [f"[기사{n['idx']}] 제목: {n['title']}\n본문: {n['body'][:400]}" for n in news_list[:5]]
     )
 
-    prompt = f"""당신은 자금 흐름과 거시경제적 관점에서 시장을 날카롭게 해설하는 유튜브/블로그 채널 '머니대디'의 수석 리서치 애널리스트(경제 분석가)입니다.
-거시적 관점(금리, 환율, 원자재)에서 오늘 시장의 핵심적인 돈의 흐름(수급)과 테마 및 거래대금 최상위 종목들이 어떠한 유기적/인과적 연결고리(Graph RAG)를 갖고 있는지 규명해야 합니다.
+    # 서두 부분의 고정 역할 지침을 정리하여 프롬프트를 간결하게 다이어트합니다.
+    prompt = f"""거시적 관점(금리, 환율, 원자재)에서 오늘 시장의 핵심적인 돈의 흐름(수급)과 테마 및 거래대금 최상위 종목들이 어떠한 유기적/인과적 연결고리(Graph RAG)를 갖고 있는지 규명하여 분석하십시오.
 
 [현재 시점]
 {datetime.now().strftime('%Y-%m-%d %H:%M')}

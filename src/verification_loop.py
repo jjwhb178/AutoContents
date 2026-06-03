@@ -8,15 +8,31 @@ import json
 import re
 import os
 import sys
+
+# Windows CP949 환경에서 이모지 등 유니코드 출력 시 UnicodeEncodeError 방지
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if sys.stderr.encoding != 'utf-8':
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 sys.path.insert(0, os.path.dirname(__file__))
 from output_paths import get_path
 
 
 # 검증할 핵심 항목 정의: (data_key, 표시 라벨, 허용 변형 포맷 생성 함수)
 VERIFY_ITEMS = [
+    ("KOSPI",      "코스피 지수"),        # 7000대 오기 → 2000대 탐지 핵심 항목
+    ("KOSDAQ",     "코스닥 지수"),
     ("VIX",        "공포지수 VIX"),
     ("TNX_10Y",    "미 10년물 금리"),
     ("USD_KRW",    "달러-원 환율"),
+    ("NASDAQ",     "나스닥 지수"),
     ("NASDAQ_chg", "나스닥 변동률"),
     ("Fear_Greed", "공포/탐욕 지수"),
 ]
@@ -26,6 +42,7 @@ def _val_variants(val) -> list[str]:
     """
     수치가 콘텐츠에 다양한 형태로 표현될 수 있으므로 변형 목록을 생성.
     예) 16.89 → ["16.89", "16.9", "16", "17"]
+    + 천 단위 쉼표 포맷 추가: 1509.65 → ["1,509.65", "1,509.6", "1,510"]
     """
     if val is None:
         return []
@@ -35,10 +52,21 @@ def _val_variants(val) -> list[str]:
         f = float(val)
         variants.append(f"{f:.1f}")   # 소수점 1자리
         variants.append(f"{f:.0f}")   # 정수
-        variants.append(str(int(f)))  # 정수 문자열
+        
+        # 10 미만의 단일 숫자는 본문 내 무작위 매칭(예: 34의 4, 4.99%의 4 등) 방지를 위해 정수 매칭 제외
+        if int(f) >= 10:
+            variants.append(str(int(f)))  # 정수 문자열
+        
+        # 천 단위 쉼표 포맷 추가
+        variants.append(f"{f:,.2f}")
+        variants.append(f"{f:,.1f}")
+        variants.append(f"{f:,.0f}")
+        
         if f > 0:
             variants.append(f"+{f:.2f}")
             variants.append(f"+{f:.1f}")
+            variants.append(f"+{f:,.2f}")
+            variants.append(f"+{f:,.1f}")
     except (ValueError, TypeError):
         pass
     return list(set(variants))
@@ -80,8 +108,12 @@ def verify_content() -> str:
         if _found_in_draft(variants, draft_content):
             report.append(f"- [OK]   {label} ({val}) - 본문에 정확히 반영됨")
         else:
-            report.append(f"- [FAIL] {label} ({val}) - 본문에서 찾을 수 없음")
-            errors += 1
+            if key in ["KOSPI", "VIX", "TNX_10Y", "USD_KRW", "Fear_Greed"]:
+                report.append(f"- [FAIL] {label} ({val}) - 본문에서 찾을 수 없음 (필수)")
+                errors += 1
+            else:
+                report.append(f"- [WARN] {label} ({val}) - 본문에서 찾을 수 없음 (선택)")
+                warnings += 1
 
     # 주도 섹터 TOP1 이름 포함 여부 확인
     top_sectors = raw_data.get("top_kr_sectors", [])

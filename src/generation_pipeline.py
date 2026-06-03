@@ -3,12 +3,26 @@ import os
 import json
 import subprocess
 
+# Windows CP949 환경에서 이모지 등 유니코드 출력 시 UnicodeEncodeError 방지
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if sys.stderr.encoding != 'utf-8':
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 # Add src to python path
 sys.path.insert(0, os.path.dirname(__file__))
 import content_generator as cg
 import verification_loop as vl
 
 def run_sub_process(cmd):
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
     process = subprocess.Popen(
         cmd,
         shell=True,
@@ -16,14 +30,17 @@ def run_sub_process(cmd):
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
-        errors="replace"
+        errors="replace",
+        env=env
     )
     while True:
         line = process.stdout.readline()
         if not line and process.poll() is not None:
             break
         if line:
-            sys.stdout.write(line)
+            enc = sys.stdout.encoding or 'utf-8'
+            safe_line = line.encode(enc, errors='replace').decode(enc)
+            sys.stdout.write(safe_line)
             sys.stdout.flush()
     return process.wait()
 
